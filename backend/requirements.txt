@@ -1,0 +1,25 @@
+# ── Core ──
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+pydantic-settings==2.*
+
+# ── Database ──
+sqlalchemy[asyncio]==2.*
+aiosqlite==0.20.*
+
+# ── HTTP client ──
+httpx==0.28.*
+duckduckgo-search>=6.*
+
+# ── AI / Embeddings ──
+numpy==2.*
+
+# ── Voice ──
+faster-whisper==1.*
+edge-tts==7.*
+
+# ── Scheduler (lightweight, no Redis needed) ──
+# Built-in asyncio scheduler, no extra deps needed
+
+# ── Dev ──
+python-multipart==0.0.*

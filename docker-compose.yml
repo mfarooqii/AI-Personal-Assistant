@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # ── Backend ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - SEARXNG_URL=http://searxng:8080
+    volumes:
+      - aria-data:/root/.aria
+    depends_on:
+      - searxng
+    restart: unless-stopped
+
+  # ── Frontend ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── SearXNG (private web search) ────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8080"
+    volumes:
+      - searxng-data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    restart: unless-stopped
+
+volumes:
+  aria-data:
+  searxng-data:

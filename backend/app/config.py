@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # ── Web Search ───────────────────────────────────────
     SEARXNG_URL: str = "http://localhost:8888"  # local SearXNG instance
     SEARCH_RESULTS_LIMIT: int = 10
+    SEARCH_PROVIDER: str = "searxng"  # searxng | tavily
+    TAVILY_API_KEY: Optional[str] = None
 
     # ── Task Queue / Scheduler ───────────────────────────
     MAX_CONCURRENT_TASKS: int = 3

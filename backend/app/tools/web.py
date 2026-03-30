@@ -11,12 +11,59 @@ from app.config import settings
 
 
 async def search(query: str, num_results: int = 5) -> dict:
-    """Search the web. Tries SearXNG first, falls back to DuckDuckGo HTML."""
+    """Search the web using the configured provider.
+
+    Provider order depends on SEARCH_PROVIDER setting:
+      - 'tavily':  Tavily → SearXNG → DuckDuckGo
+      - 'searxng': SearXNG → (Tavily if key set) → DuckDuckGo
+    """
     num_results = int(num_results)
+
+    if settings.SEARCH_PROVIDER == "tavily" and settings.TAVILY_API_KEY:
+        try:
+            return await _tavily_search(query, num_results)
+        except Exception:
+            pass
+        try:
+            return await _searxng_search(query, num_results)
+        except Exception:
+            return await _duckduckgo_fallback(query, num_results)
+
+    # Default: SearXNG-first path
     try:
         return await _searxng_search(query, num_results)
     except Exception:
-        return await _duckduckgo_fallback(query, num_results)
+        pass
+
+    # Try Tavily as middle fallback when key is available
+    if settings.TAVILY_API_KEY:
+        try:
+            return await _tavily_search(query, num_results)
+        except Exception:
+            pass
+
+    return await _duckduckgo_fallback(query, num_results)
+
+
+async def _tavily_search(query: str, num_results: int) -> dict:
+    """Search using the Tavily API."""
+    import asyncio
+    from tavily import TavilyClient
+
+    def _sync_search():
+        client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+        response = client.search(query=query, max_results=num_results)
+        results = []
+        for r in response.get("results", []):
+            results.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": r.get("content", ""),
+            })
+        return results
+
+    results = await asyncio.to_thread(_sync_search)
+    return {"results": results, "source": "tavily"}
 
 
 async def _searxng_search(query: str, num_results: int) -> dict:

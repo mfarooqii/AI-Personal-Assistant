@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.memory.database import init_db
 from app.routes import chat, tasks, memory, voice, settings as settings_routes, workflows
-from app.routes import onboarding, integrations, browser
+from app.routes import onboarding, integrations, browser, extension
 from app.scheduler.engine import scheduler
 
 
@@ -47,6 +47,7 @@ app.include_router(workflows.router, prefix="/api/workflows", tags=["workflows"]
 app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["integrations"])
 app.include_router(browser.router, prefix="/api/browser", tags=["browser"])
+app.include_router(extension.router, prefix="/api/extension", tags=["extension"])
 
 
 @app.get("/api/health")

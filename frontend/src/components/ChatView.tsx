@@ -1,18 +1,22 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Send, Mic, Bot, User, Loader2 } from 'lucide-react';
-import { sendMessage, getMessages, type ChatMessage } from '../api';
+import { Send, Mic, Bot, User, Loader2, PanelRightOpen } from 'lucide-react';
+import { sendMessage, getMessages, type ChatMessage, type LayoutDirective } from '../api';
+import { isAdaptiveLayout } from './DashboardRenderer';
 
 interface Props {
   conversationId?: string;
   onConversationCreated: (id: string) => void;
+  onLayoutChange?: (layout: LayoutDirective) => void;
+  initialMessage?: string;
 }
 
-export function ChatView({ conversationId, onConversationCreated }: Props) {
+export function ChatView({ conversationId, onConversationCreated, onLayoutChange, initialMessage }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<string>('');
+  const [hasSentInitial, setHasSentInitial] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Load existing messages when conversation changes
@@ -29,11 +33,18 @@ export function ChatView({ conversationId, onConversationCreated }: Props) {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
+  // Auto-send initial message from HomeView quick actions
+  useEffect(() => {
+    if (initialMessage && !hasSentInitial && !loading && !conversationId) {
+      setHasSentInitial(true);
+      // Send the initial message directly
+      sendMessageInternal(initialMessage);
+    }
+  }, [initialMessage, hasSentInitial, loading, conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    setInput('');
+  const sendMessageInternal = async (text: string) => {
+    if (!text.trim() || loading) return;
+
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setLoading(true);
 
@@ -51,8 +62,14 @@ export function ChatView({ conversationId, onConversationCreated }: Props) {
           agent: resp.agent,
           model: resp.model,
           tool_calls: resp.tool_calls,
+          layout: resp.layout,
         },
       ]);
+
+      // Trigger adaptive dashboard or browser if layout directive is present
+      if (resp.layout && onLayoutChange) {
+        onLayoutChange(resp.layout);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -61,6 +78,13 @@ export function ChatView({ conversationId, onConversationCreated }: Props) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput('');
+    await sendMessageInternal(text);
   };
 
   return (
@@ -108,6 +132,16 @@ export function ChatView({ conversationId, onConversationCreated }: Props) {
                       Tools used: {msg.tool_calls.map((tc: any) => tc.tool).join(', ')}
                     </span>
                   </div>
+                )}
+
+                {msg.layout && isAdaptiveLayout(msg.layout) && (
+                  <button
+                    onClick={() => onLayoutChange?.(msg.layout!)}
+                    className="mt-2 flex items-center gap-1.5 text-xs text-aria-400/70 hover:text-aria-400 transition-colors"
+                  >
+                    <PanelRightOpen size={12} />
+                    View as {msg.layout.layout.replace('_', ' ')}
+                  </button>
                 )}
               </div>
 

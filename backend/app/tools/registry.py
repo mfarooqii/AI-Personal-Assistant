@@ -51,7 +51,7 @@ register_tool(ToolSpec(
 
 register_tool(ToolSpec(
     name="web_scrape",
-    description="Fetch and extract the main text content from a web page URL.",
+    description="Fetch and extract the full article content, title, author, and publication date from a URL. Use this after web_search to get the full article text.",
     parameters={
         "type": "object",
         "properties": {
@@ -60,6 +60,20 @@ register_tool(ToolSpec(
         "required": ["url"],
     },
     handler="app.tools.web.scrape",
+))
+
+register_tool(ToolSpec(
+    name="news_search",
+    description="Search specifically for recent news articles. Returns article titles, URLs, snippets, source names, and publication dates. Always use this for news, current events, politics, sports, and breaking news queries.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "News search query"},
+            "num_results": {"type": "integer", "description": "Number of results (default 5)", "default": 5},
+        },
+        "required": ["query"],
+    },
+    handler="app.tools.web.news_search",
 ))
 
 register_tool(ToolSpec(
@@ -158,4 +172,63 @@ register_tool(ToolSpec(
         "required": ["command"],
     },
     handler="app.tools.shell.run_command",
+))
+
+# ── Gmail / Email Tools ─────────────────────────────────
+
+register_tool(ToolSpec(
+    name="gmail_list",
+    description="List emails from the user's Gmail inbox. Returns subject, sender, date, snippet, and read status.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Gmail search query (e.g., 'is:unread', 'from:boss@example.com')"},
+            "max_results": {"type": "integer", "description": "Number of emails to return (default 15)", "default": 15},
+            "label": {"type": "string", "description": "Gmail label (default INBOX)", "default": "INBOX"},
+        },
+        "required": [],
+    },
+    handler="app.integrations.gmail.list_emails",
+))
+
+register_tool(ToolSpec(
+    name="gmail_read",
+    description="Read the full content of a specific email by its ID. Also marks it as read.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "email_id": {"type": "string", "description": "The Gmail message ID to read"},
+        },
+        "required": ["email_id"],
+    },
+    handler="app.integrations.gmail.read_email",
+))
+
+register_tool(ToolSpec(
+    name="gmail_search",
+    description="Search the user's emails using Gmail search syntax. Supports queries like 'from:john subject:invoice after:2026/01/01'.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Gmail search query"},
+            "max_results": {"type": "integer", "description": "Number of results (default 10)", "default": 10},
+        },
+        "required": ["query"],
+    },
+    handler="app.integrations.gmail.search_emails",
+))
+
+register_tool(ToolSpec(
+    name="gmail_send",
+    description="Send an email from the user's Gmail account.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "to": {"type": "string", "description": "Recipient email address"},
+            "subject": {"type": "string", "description": "Email subject line"},
+            "body": {"type": "string", "description": "Email body text"},
+        },
+        "required": ["to", "subject", "body"],
+    },
+    handler="app.integrations.gmail.send_email",
 ))

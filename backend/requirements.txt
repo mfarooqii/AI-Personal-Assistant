@@ -11,6 +11,17 @@ aiosqlite==0.20.*
 httpx==0.28.*
 duckduckgo-search>=6.*
 
+# ── Content extraction ──
+trafilatura>=1.9.*
+
+# ── Google Integration ──
+google-auth>=2.*
+google-auth-oauthlib>=1.*
+google-api-python-client>=2.*
+
+# ── Browser Agent ──
+playwright>=1.49.*
+
 # ── AI / Embeddings ──
 numpy==2.*
 

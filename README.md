@@ -1,49 +1,51 @@
 <div align="center">
 
-# 🌟 Aria — Your Personal AI Assistant
+# Aria — One Interface for Everything
 
-**A local-first, privacy-respecting AI assistant that actually works for daily life.**
+**Replace 50 apps with one conversation. Your AI assistant that morphs into whatever you need.**
 
-Like "Her" from the movie — but running on your laptop, with your data staying yours.
+Like having a personal assistant who can turn into a calendar, a news reader, a task board, a flight search engine, an email client — all by just asking.
 
-[Quick Start](#-quick-start) · [Features](#-features) · [Architecture](#-architecture) · [Configuration](#-configuration)
+Running locally on your machine. Your data stays yours.
+
+[Quick Start](#-quick-start) · [How It Works](#-how-it-works) · [Features](#-features) · [Architecture](#-architecture)
 
 </div>
 
 ---
 
-## ✨ Features
+## 💡 The Idea
 
-| Feature | Description |
-|---------|-------------|
-| **🧠 Persistent Memory** | Remembers your preferences, budget, dietary needs, and context across conversations |
-| **🤖 Multi-Agent System** | 7 specialized agents (general, researcher, planner, finance, health, coder, writer) — auto-routes to the best one |
-| **🔧 Tool Calling** | Web search, web scraping, file I/O, shell commands, calculator, reminders |
-| **🎙️ Voice Interaction** | Hold-to-talk voice input (Whisper STT) + text-to-speech (Piper/Edge TTS) |
-| **🔍 Private Web Search** | Self-hosted SearXNG — no tracking, no ads, no data sold |
-| **⏰ Reminders & Scheduling** | "Remind me at 3pm" / "Run this task after 10pm" |
-| **💰 Budget Tracking** | Track monthly income/expenses, ask "can I eat out tonight?" |
-| **🍳 Recipes & Health** | Diet plans, exercise schedules, meal planning |
-| **📰 News & Research** | "Show me news about XYZ" → fetched, formatted, summarizable |
-| **🚀 Works Offline** | Runs 100% locally via Ollama — no API keys needed |
-| **📱 Adaptive UI** | Clean dark interface that adapts to show tables, articles, lists, code |
+Computing started with terminals. Then GUIs took over. Now it's time for the next shift: **you talk, the computer transforms.**
+
+Instead of opening Gmail for email, Google Calendar for scheduling, Trello for tasks, Chrome for news, and Excel for data — you open Aria, say what you need, and the interface becomes that thing.
+
+```
+You:    "Show me today's news about AI"
+Aria:   → screen morphs into a Perplexity-style news article with sources
+
+You:    "What's my schedule this week?"
+Aria:   → screen morphs into a calendar view
+
+You:    "Compare flights to Dubai under $500"
+Aria:   → screen morphs into a travel comparison table
+
+You:    "Show my tasks"
+Aria:   → screen morphs into a Jira-like kanban board
+```
+
+**One app. Every shape. Like water.**
+
+---
 
 ## 🚀 Quick Start
 
-### One-Command Setup
+### First Time Setup
 
 ```bash
 git clone <your-repo-url> && cd AI-Personal-Assistant
 chmod +x setup.sh && ./setup.sh
 ```
-
-This will:
-1. Check Python & Node.js (install if needed)
-2. Install Ollama (local AI server)
-3. Auto-detect your RAM and pull appropriate models
-4. Set up backend (Python venv + dependencies)
-5. Set up frontend (npm install)
-6. Create `.env` with optimal settings for your hardware
 
 ### Start Aria
 
@@ -51,53 +53,123 @@ This will:
 ./start.sh
 ```
 
-Open **http://localhost:3000** — that's it!
+Open **http://localhost:3000** — Aria will greet you and set itself up through conversation.
 
 ### Docker (Alternative)
 
 ```bash
-# First install Ollama on your host: https://ollama.com
 ollama pull llama3.2 && ollama pull phi4-mini && ollama pull nomic-embed-text
-
 docker-compose up -d
-# Open http://localhost:3000
 ```
+
+---
+
+## 🎯 How It Works
+
+### For You (The User)
+
+1. **Open Aria** → clean screen with a voice orb and text input
+2. **First time?** → Aria asks your name, what you do, what matters to you — sets everything up through chat
+3. **Just talk** → type or speak what you need
+4. **Screen transforms** → the right interface appears automatically
+5. **Connect your accounts** → Gmail, Slack, Calendar — browse everything in one place
+6. **It remembers** → your preferences, habits, and context — forever
+
+### For Developers (Under The Hood)
+
+1. **User speaks** → message hits FastAPI backend
+2. **Router** classifies intent → picks the best specialist agent (15 agents)
+3. **Pre-retrieval** → for news/research, web content is fetched BEFORE the model responds
+4. **Agent executes** → calls tools (search, scrape, calculate, remember, etc.)
+5. **Layout Engine** classifies the response → picks the right UI view
+6. **Frontend morphs** → React renders the matching layout (calendar, kanban, news, finance, etc.)
+7. **Memory stores** context for next time
+
+---
+
+## ✨ Features
+
+### Adaptive UI — The Screen Becomes What You Need
+
+| Say This | Screen Becomes |
+|----------|---------------|
+| "Show me today's news" | Perplexity-style article with summaries + sources |
+| "What's my schedule?" | Calendar with events and reminders |
+| "Track my expenses" | Financial dashboard with charts |
+| "Show my tasks" | Kanban board (like Jira/Trello) |
+| "Compare these laptops" | Side-by-side comparison table |
+| "Search for hotels in Paris" | Search result cards with prices |
+| "Write a blog post about..." | Document editor view |
+| "Show me a timeline of..." | Visual timeline |
+| "Analyze this data" | Sortable data table |
+
+### 15 Specialist Agents
+General chat, Research, Planning, Finance, Health, Coding, Writing, Education, Legal, Real Estate, Design, Data Analysis, DevOps, Marketing, HR — auto-routed by intent.
+
+### Real Web Search
+Not hallucinated results. Aria searches the web (SearXNG / DuckDuckGo), scrapes articles, and presents real content with citations — like Perplexity.
+
+### Persistent Memory
+Aria remembers your name, budget, dietary restrictions, work schedule, preferences — and uses them automatically in every interaction.
+
+### Voice In/Out
+Speak to Aria using the voice orb. Local speech-to-text (Whisper) and text-to-speech (Piper/Edge TTS).
+
+### Gmail & Messaging Integration
+Connect your Gmail and messaging apps. Browse emails, reply, and manage conversations — all from Aria.
+
+### 100% Local & Private
+Runs on your machine via Ollama. No API keys needed. No data sent to any cloud. Your personal data stays personal.
 
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     Frontend (React)                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ Voice Orb│  │ Chat View│  │ Sidebar  │  │Adaptive │ │
-│  │ (STT/TTS)│  │(Markdown)│  │ (History)│  │  Layout │ │
-│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
-└────────────────────────┬─────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     Frontend (React + Vite)                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │
+│  │ Voice Orb│  │ Chat View│  │ Sidebar  │  │Adaptive     │ │
+│  │ (STT/TTS)│  │(Markdown)│  │ (History)│  │Dashboard    │ │
+│  └──────────┘  └──────────┘  └──────────┘  │(11 views)   │ │
+│                                             └─────────────┘ │
+│  Morphing Views: News │ Calendar │ Finance │ Kanban │ Code  │
+│    Search │ Comparison │ Timeline │ Table │ Document │ ...  │
+└────────────────────────┬─────────────────────────────────────┘
                          │ HTTP / SSE
-┌────────────────────────┴─────────────────────────────────┐
-│                    Backend (FastAPI)                       │
-│                                                           │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │                  Agent Router                        │ │
-│  │    Analyzes intent → picks best specialist agent     │ │
-│  └──────────┬──────────────────────────────────────────┘ │
-│             │                                             │
-│  ┌──────────▼──────────────────────────────────────────┐ │
-│  │              Specialist Agents                       │ │
-│  │  General │ Researcher │ Planner │ Finance │ Health   │ │
-│  │          │ Coder      │ Writer  │                    │ │
-│  └──────────┬──────────────────────────────────────────┘ │
-│             │                                             │
-│  ┌──────────▼──────────────────────────────────────────┐ │
-│  │                  Tool System                         │ │
-│  │  web_search │ web_scrape │ calculator │ file_io     │ │
-│  │  memory_search │ memory_store │ reminders │ shell   │ │
-│  └──────────┬──────────────────────────────────────────┘ │
-│             │                                             │
-│  ┌──────────▼────────┐  ┌────────────┐  ┌────────────┐  │
-│  │  Memory Manager   │  │ Scheduler  │  │ Task Queue │  │
-│  │ (Semantic Search) │  │ (Reminders)│  │ (Async)    │  │
-│  └──────────┬────────┘  └────────────┘  └────────────┘  │
+┌────────────────────────┴─────────────────────────────────────┐
+│                    Backend (FastAPI)                           │
+│                                                               │
+│  ┌──────────────────┐  ┌──────────────────┐ ┌─────────────┐ │
+│  │   Agent Router    │  │ Layout Engine    │ │ Onboarding  │ │
+│  │ 15 specialists    │  │ 15 layout types  │ │ Wizard      │ │
+│  └────────┬─────────┘  └──────────────────┘ └─────────────┘ │
+│           │                                                   │
+│  ┌────────▼─────────┐  ┌──────────────────┐ ┌─────────────┐ │
+│  │  Pre-Retrieval   │  │  Workflow Engine  │ │Integrations │ │
+│  │  Pipeline (RAG)  │  │  10 workflows    │ │Gmail, Slack │ │
+│  └────────┬─────────┘  └──────────────────┘ └─────────────┘ │
+│           │                                                   │
+│  ┌────────▼─────────────────────────────────────────────────┐│
+│  │                    Tool System                            ││
+│  │ web_search │ news_search │ web_scrape │ calculator       ││
+│  │ memory_search │ memory_store │ reminders │ file_io │ sh  ││
+│  │ gmail_read │ gmail_send │ gmail_search (coming)          ││
+│  └──────────────────────────────────────────────────────────┘│
+│                                                               │
+│  ┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐ │
+│  │ Memory Manager   │ │  Scheduler   │ │   Task Queue     │ │
+│  │(Semantic Search) │ │ (Reminders)  │ │   (Background)   │ │
+│  └────────┬─────────┘ └──────────────┘ └──────────────────┘ │
+└───────────┼──────────────────────────────────────────────────┘
+            │
+┌───────────▼──────────┐  ┌────────────────────────────────────┐
+│   SQLite Database    │  │     Ollama (Local AI Models)       │
+│   - Conversations    │  │     - llama3.2 (chat)              │
+│   - Memory entries   │  │     - qwen2.5-coder (code)        │
+│   - User profile     │  │     - phi4-mini (fast routing)    │
+│   - Tasks/Reminders  │  │     - nomic-embed-text (search)   │
+│   - OAuth tokens     │  │                                    │
+└──────────────────────┘  └────────────────────────────────────┘
+```
 └─────────────┼────────────────────────────────────────────┘
               │
 ┌─────────────▼────────┐  ┌────────────────────────────────┐

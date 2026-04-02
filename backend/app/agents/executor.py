@@ -22,6 +22,9 @@ from app.tools.executor import execute_tool_call
 from app.memory.manager import MemoryManager
 from app.config import settings
 
+# Agents that benefit from pre-retrieval (search BEFORE model generates)
+_RETRIEVAL_AGENTS = {"researcher", "general", "planner"}
+
 # Models that don't support Ollama native function/tool calling — ReAct fallback used.
 # Add model name prefixes here if you hit 400 errors with a new model.
 MODELS_WITHOUT_NATIVE_TOOLS: set[str] = {
@@ -95,6 +98,7 @@ async def _build_context(
     conversation_history: list[dict],
     db: AsyncSession,
     react_mode: bool = False,
+    grounding_prompt: str = "",
 ) -> list[dict]:
     """Build the full message list with system prompt, memory context, and history."""
     memories = await MemoryManager.search(db, user_message, limit=5)
@@ -106,6 +110,10 @@ async def _build_context(
 
     system_prompt = agent.system_prompt.format(name=settings.APP_NAME) + memory_text
     system_prompt += f"\n\nCurrent time: {datetime.now().strftime('%Y-%m-%d %H:%M %Z')}"
+
+    # Inject pre-retrieved web content so the model synthesizes from real data
+    if grounding_prompt:
+        system_prompt += grounding_prompt
 
     if react_mode and agent.tools:
         tool_list = _build_tool_list_text(agent)
@@ -236,48 +244,101 @@ async def run(
     model = _resolve_model(agent.model_key)
     tools_schema = _build_tools_schema(agent)
 
+    # ── Pre-Retrieval (Perplexity-style RAG) ─────────────────────────────────
+    # For research/news agents, fetch real web content BEFORE the model responds.
+    # This guarantees fresh data even if the model would skip tool calls.
+    retrieval_ctx = None
+    extra_tool_calls: list[dict] = []
+    grounding_prompt = ""
+
+    if agent.name in _RETRIEVAL_AGENTS:
+        try:
+            from app.agents.retrieval import pre_retrieve
+            retrieval_ctx = await pre_retrieve(user_message, db)
+        except Exception:
+            retrieval_ctx = None
+
+    if retrieval_ctx:
+        grounding_prompt = retrieval_ctx.get("grounding_prompt", "")
+        # Surface search results as virtual tool_calls so the layout engine sees them
+        if retrieval_ctx.get("search_results"):
+            extra_tool_calls.append({
+                "tool": "news_search" if retrieval_ctx.get("query_type") == "news" else "web_search",
+                "args": {"query": retrieval_ctx.get("query", "")},
+                "result": {"results": retrieval_ctx["search_results"]},
+            })
+        for article in retrieval_ctx.get("articles", []):
+            extra_tool_calls.append({
+                "tool": "web_scrape",
+                "args": {"url": article.get("url", "")},
+                "result": article,
+            })
+
     # No tools needed — plain chat
     if not tools_schema:
-        messages = await _build_context(agent, user_message, conversation_history, db)
+        messages = await _build_context(
+            agent, user_message, conversation_history, db,
+            grounding_prompt=grounding_prompt,
+        )
         try:
             resp = await chat_completion(model, messages)
         except ModelUnavailableError:
             model = settings.MODEL_CHAT
-            messages = await _build_context(agent, user_message, conversation_history, db)
+            messages = await _build_context(
+                agent, user_message, conversation_history, db,
+                grounding_prompt=grounding_prompt,
+            )
             resp = await chat_completion(model, messages)
         return {
             "content": resp.get("message", {}).get("content", ""),
             "model": model,
             "agent": agent.name,
-            "tool_calls": None,
+            "tool_calls": extra_tool_calls or None,
         }
 
     if _uses_native_tools(model):
-        messages = await _build_context(agent, user_message, conversation_history, db, react_mode=False)
+        messages = await _build_context(
+            agent, user_message, conversation_history, db,
+            react_mode=False, grounding_prompt=grounding_prompt,
+        )
         try:
-            return await _run_native(model, agent, messages, tools_schema, db)
+            result = await _run_native(model, agent, messages, tools_schema, db)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
-                # Model rejected tools — add to blocklist and fall through to ReAct
                 MODELS_WITHOUT_NATIVE_TOOLS.add(model)
             else:
                 raise
         except ModelUnavailableError:
-            # Model too large — fall back to MODEL_CHAT (which supports native tools)
             model = settings.MODEL_CHAT
-            messages = await _build_context(agent, user_message, conversation_history, db, react_mode=False)
-            return await _run_native(model, agent, messages, tools_schema, db)
+            messages = await _build_context(
+                agent, user_message, conversation_history, db,
+                react_mode=False, grounding_prompt=grounding_prompt,
+            )
+            result = await _run_native(model, agent, messages, tools_schema, db)
+        else:
+            # Merge pre-fetch results with any tool calls the model made
+            existing = result.get("tool_calls") or []
+            result["tool_calls"] = (extra_tool_calls + existing) or None
+            return result
 
-    # ReAct mode for models that don't support native tool calling (e.g. deepseek-r1)
-    messages = await _build_context(agent, user_message, conversation_history, db, react_mode=True)
+    # ReAct mode
+    messages = await _build_context(
+        agent, user_message, conversation_history, db,
+        react_mode=True, grounding_prompt=grounding_prompt,
+    )
     try:
-        return await _run_react(model, agent, messages, db)
+        result = await _run_react(model, agent, messages, db)
     except ModelUnavailableError:
-        # Reasoning model unavailable — fall back to MODEL_CHAT
-        # MODEL_CHAT (llama3.2) supports native tools, so switch to that path
         model = settings.MODEL_CHAT
-        messages = await _build_context(agent, user_message, conversation_history, db, react_mode=False)
-        return await _run_native(model, agent, messages, tools_schema, db)
+        messages = await _build_context(
+            agent, user_message, conversation_history, db,
+            react_mode=False, grounding_prompt=grounding_prompt,
+        )
+        result = await _run_native(model, agent, messages, tools_schema, db)
+
+    existing = result.get("tool_calls") or []
+    result["tool_calls"] = (extra_tool_calls + existing) or None
+    return result
 
 
 async def run_stream(

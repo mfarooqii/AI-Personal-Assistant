@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     MODEL_VISION: str = "llava"           # image understanding
     MODEL_EMBEDDING: str = "nomic-embed-text"  # embeddings for memory search
     MODEL_SMALL: str = "phi4-mini"        # fast, lightweight tasks (classification, routing)
+    MODEL_BROWSER: str = "llama3.2"      # browser agent — override to qwen2.5:7b or qwen3.5 for better results
 
     # ── Voice ────────────────────────────────────────────
     VOICE_ENABLED: bool = True

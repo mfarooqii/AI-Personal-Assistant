@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.memory.database import init_db
-from app.routes import chat, tasks, memory, voice, settings as settings_routes
+from app.routes import chat, tasks, memory, voice, settings as settings_routes, workflows
+from app.routes import onboarding, integrations, browser
 from app.scheduler.engine import scheduler
 
 
@@ -42,6 +43,10 @@ app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 app.include_router(voice.router, prefix="/api/voice", tags=["voice"])
 app.include_router(settings_routes.router, prefix="/api/settings", tags=["settings"])
+app.include_router(workflows.router, prefix="/api/workflows", tags=["workflows"])
+app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
+app.include_router(integrations.router, prefix="/api/integrations", tags=["integrations"])
+app.include_router(browser.router, prefix="/api/browser", tags=["browser"])
 
 
 @app.get("/api/health")

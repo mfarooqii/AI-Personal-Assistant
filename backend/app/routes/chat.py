@@ -1,5 +1,6 @@
 """
 Chat routes — main conversation endpoint with streaming support.
+Integrates the workflow engine and layout engine for adaptive UI.
 """
 
 import json
@@ -13,6 +14,10 @@ from app.memory.database import get_db
 from app.memory.models import Conversation, Message
 from app.agents.router import route
 from app.agents.executor import run, run_stream
+from app.agents.layout_engine import classify_layout
+from app.workflows import find_workflow
+from app.workflows.executor import execute_workflow
+from app.browser.detect import detect_browser_intent
 
 router = APIRouter()
 
@@ -23,12 +28,19 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class LayoutDirective(BaseModel):
+    layout: str = "chat"
+    title: str = ""
+    data: Optional[dict] = None
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     content: str
     agent: str
     model: str
     tool_calls: Optional[list] = None
+    layout: Optional[LayoutDirective] = None
 
 
 @router.post("", response_model=ChatResponse)
@@ -58,7 +70,88 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     )
     history = [{"role": m.role, "content": m.content} for m in result.scalars().all()]
 
-    # Route to best agent
+    # ── Check for browser intent first (email, shopping, login) ──
+    browser_intent = detect_browser_intent(req.message)
+    if browser_intent and not req.stream:
+        # Create plan using the shared browser singleton & set session state
+        from app.routes.browser import _get_agent, _get_engine, set_session
+
+        engine = _get_engine()
+        agent_b = _get_agent()
+        await engine.launch()
+        plan = await agent_b.plan_task(req.message)
+        set_session(req.message, plan)
+
+        # Save a short assistant message explaining what's happening
+        explanation = (
+            f"I'll open a browser to help with this. "
+            f"Heading to **{plan.get('website', 'the web')}**..."
+        )
+        if plan.get("needs_login"):
+            explanation += " You'll need to sign in — I'll show you the page."
+
+        assistant_msg = Message(
+            conversation_id=convo.id,
+            role="assistant",
+            content=explanation,
+            model_used="browser-agent",
+        )
+        db.add(assistant_msg)
+        await db.commit()
+
+        if len(history) <= 2:
+            convo.title = req.message[:80]
+            await db.commit()
+
+        return ChatResponse(
+            conversation_id=convo.id,
+            content=explanation,
+            agent="browser",
+            model="browser-agent",
+            layout=LayoutDirective(
+                layout="browser",
+                title="Browser",
+                data={
+                    "task": req.message,
+                    "plan": plan,
+                    "category": browser_intent.get("category", ""),
+                    "provider_hint": browser_intent.get("provider_hint", ""),
+                },
+            ),
+        )
+
+    # ── Check for matching workflow first ──
+    workflow = find_workflow(req.message)
+
+    if workflow and not req.stream:
+        # Execute the full workflow pipeline
+        wf_result = await execute_workflow(workflow, req.message, history[:-1], db)
+
+        # Save assistant message
+        assistant_msg = Message(
+            conversation_id=convo.id,
+            role="assistant",
+            content=wf_result["content"],
+            model_used=wf_result.get("model", "workflow"),
+            tool_calls=wf_result.get("tool_calls"),
+        )
+        db.add(assistant_msg)
+        await db.commit()
+
+        if len(history) <= 2:
+            convo.title = req.message[:80]
+            await db.commit()
+
+        return ChatResponse(
+            conversation_id=convo.id,
+            content=wf_result["content"],
+            agent=wf_result["agent"],
+            model=wf_result.get("model", "workflow"),
+            tool_calls=wf_result.get("tool_calls"),
+            layout=LayoutDirective(**wf_result.get("layout", {"layout": "chat"})),
+        )
+
+    # ── Standard agent routing ──
     agent = await route(req.message, history)
 
     if req.stream:
@@ -78,7 +171,9 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
             db.add(assistant_msg)
             await db.commit()
 
-            yield f"data: {json.dumps({'done': True, 'agent': agent.name})}\n\n"
+            # Classify layout for the complete response
+            layout = await classify_layout(req.message, full_content, agent.name)
+            yield f"data: {json.dumps({'done': True, 'agent': agent.name, 'layout': layout})}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -101,12 +196,21 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
         convo.title = req.message[:80]
         await db.commit()
 
+    # ── Classify layout for adaptive UI ──
+    layout = await classify_layout(
+        req.message,
+        result["content"],
+        result["agent"],
+        result.get("tool_calls"),
+    )
+
     return ChatResponse(
         conversation_id=convo.id,
         content=result["content"],
         agent=result["agent"],
         model=result["model"],
         tool_calls=result.get("tool_calls"),
+        layout=LayoutDirective(**layout),
     )
 
 

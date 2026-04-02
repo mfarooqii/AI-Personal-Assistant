@@ -98,6 +98,10 @@ class UserProfile(Base):
 
     id = Column(Integer, primary_key=True, default=1)
     name = Column(String, nullable=True)
+    profession = Column(String, nullable=True)             # "doctor", "student", "engineer", etc.
+    priorities = Column(JSON, default=list)                 # ["email", "calendar", "news", "tasks"]
+    onboarding_completed = Column(Boolean, default=False)
+    onboarding_step = Column(Integer, default=0)
     preferences = Column(JSON, default=dict)              # {theme, language, voice_speed, …}
     monthly_budget = Column(JSON, nullable=True)           # {income, categories: {food, rent, …}}
     health_profile = Column(JSON, nullable=True)           # {dietary_restrictions, allergies, …}

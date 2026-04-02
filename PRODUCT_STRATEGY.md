@@ -1,15 +1,34 @@
 # Aria — Product Strategy Document
-**Version:** 1.0  
-**Date:** March 2026  
+**Version:** 2.0  
+**Date:** April 2026  
 **Status:** Living Document
 
 ---
 
 ## Vision
 
-> "An AI that knows you across time — private, proactive, and present in every tool you use."
+> **"Replace every app on your computer with one conversation."**
+
+Computing started with terminals — you typed commands to talk to the computer. Then GUIs and the web took over. Now a new era begins: you **talk** to your computer in plain language, and it shows you exactly what you need — a calendar, a news article, a kanban board, a flight comparison, an email inbox — all in one interface that morphs like water into whatever shape the moment demands.
+
+Aria is not another chatbot. Aria is the **post-app operating layer** — a single conversational interface that replaces jumping between 50 apps, 50 logins, and 50 different UIs. You speak or type what you need, and the interface transforms to deliver it.
+
+### Who Is This For?
+
+**Everyone.** Doctors, students, engineers, nurses, pilots, office workers, business owners, coders, receptionists, teachers, plumbers, teenagers, retirees — anyone who uses a computer but shouldn't need to learn 50 different apps to get things done.
+
+### The Core Thesis
 
 The market is full of AI that resets every session, lives in silos, and demands constant re-explanation. Aria's mission is to be the first personal AI with **persistent identity, cross-app context, and proactive intelligence** — running locally, owned by the user, never selling their data.
+
+### How It Works (For a Non-Technical Person)
+
+1. **Install Aria** → one click, runs on your computer
+2. **Talk to Aria** → "Good morning" and it sets itself up by asking you questions
+3. **The screen becomes what you need** → ask for news, it becomes a news reader. Ask for your schedule, it becomes a calendar. Ask to compare flights, it becomes a travel planner.
+4. **It remembers you** → your preferences, your budget, your allergies, your work style — forever
+5. **Connect your stuff** → Gmail, Slack, calendar — browse everything from one place
+6. **Your data stays yours** → runs on your machine, no cloud required
 
 ---
 

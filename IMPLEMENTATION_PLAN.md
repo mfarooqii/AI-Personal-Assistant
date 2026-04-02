@@ -1,6 +1,6 @@
 # Aria — Implementation Plan
-**Version:** 1.0  
-**Date:** March 2026  
+**Version:** 2.0  
+**Date:** April 2026  
 **Reference:** PRODUCT_STRATEGY.md
 
 Each ticket is self-contained: what to build, how to implement it, how to test it, what to expect, and exactly what tools/libraries to install.
@@ -10,11 +10,75 @@ Each ticket is self-contained: what to build, how to implement it, how to test i
 ## Phase 1 — Core Assistant ✅ COMPLETE
 
 Already built and working:
-- FastAPI backend, multi-agent routing, tool calling, web search, SQLite memory, voice I/O, React frontend, Docker
+- FastAPI backend, multi-agent routing (15 agents), tool calling (10 tools)
+- Web search (SearXNG + DuckDuckGo), news search, web scraping with trafilatura
+- Pre-retrieval pipeline (Perplexity-style RAG — forces real web data before model responds)
+- SQLite memory with semantic search (embedding-based)
+- Voice I/O (faster-whisper STT + Piper/Edge TTS)
+- React frontend with dark theme, chat view, sidebar
+- Adaptive Layout Engine — 15 layout types, 11 built view components
+- 10 pre-built multi-step workflows
+- Background task scheduler with recurring reminders
+- Docker + one-command setup
 
 ---
 
-## Phase 2 — Memory Layer + Browser Extension
+## Phase 2 — Onboarding + Morphing UI + Integrations 🔄 IN PROGRESS
+
+### TICKET-200: Conversational Onboarding Wizard ✅ COMPLETE
+
+**What it does:**
+First-time users are greeted by Aria who asks simple questions to set up their profile:
+- "What's your name?"
+- "What do you do for work?"
+- "What should I help you with most?"
+
+All setup happens through conversation — no settings pages. The backend detects first-time-use
+and triggers onboarding mode. Answers are stored in UserProfile and memory.
+
+**Implementation:**
+- Backend: `POST /api/onboarding/status` — returns `{completed: bool, step: int}`
+- Backend: `POST /api/onboarding/step` — processes one step, stores answer, returns next question
+- Frontend: `OnboardingView.tsx` — step-by-step conversational UI between HomeView and ChatView
+- Onboarding agent in registry with profile-building system prompt
+
+### TICKET-201: Morphing Dashboard + Quick Actions ✅ COMPLETE
+
+**What it does:**
+The home screen shows quick-action cards that launch common interactions. The adaptive dashboard
+panel smoothly transitions between different views based on AI intent classification.
+
+**Implementation:**
+- `HomeView.tsx` redesigned with morning greeting + quick-action cards
+- Layout transitions use CSS animations for smooth morphing
+- Each quick-action card pre-fills a prompt that triggers a specific agent + layout
+
+### TICKET-202: Gmail Integration ✅ COMPLETE
+
+**What it does:**
+Users connect their Gmail through a simple OAuth flow. Once connected, they can:
+- "Show me my unread emails" → email inbox layout
+- "Reply to John's email about the meeting" → Aria drafts a reply
+- "Search my emails for invoices from last month" → results view
+
+**Implementation:**
+- Backend: OAuth2 flow for Gmail (google-auth, google-api-python-client)
+- Backend: Gmail tools (gmail_list, gmail_read, gmail_send, gmail_search)
+- Frontend: Email layout component + OAuth connection UI
+- SecureToken model for storing refresh tokens in SQLite (encrypted)
+
+### TICKET-203: Messaging Integration Foundation
+
+**What it does:**
+A generic integration framework that allows connecting messaging platforms:
+- Slack (via web API + OAuth)
+- Future: WhatsApp Web, Telegram, Discord
+
+**Implementation:**
+- `backend/app/integrations/` — plugin system for external services
+- `IntegrationToken` model in database
+- Generic `messaging_list`, `messaging_read`, `messaging_send` tools
+- Frontend: Messages layout component
 
 ---
 

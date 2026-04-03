@@ -120,7 +120,18 @@ pip install -q -r requirements.txt
 log_ok "Backend dependencies installed"
 cd ..
 
-# ── Step 6: Frontend setup ──────────────────────────────
+# ── Step 6: Install browser automation (patchright) ────
+
+log_step "Installing stealth browser (patchright)..."
+cd backend
+source venv/bin/activate
+# patchright is a stealth-patched Playwright fork — bypasses bot detection
+python -m patchright install chromium 2>&1 | tail -3 || log_warn "patchright chromium install failed — browser agent may be detected as bot"
+log_ok "Stealth browser ready"
+deactivate
+cd ..
+
+# ── Step 7: Frontend setup ──────────────────────────────
 
 log_step "Setting up frontend..."
 cd frontend
@@ -128,7 +139,13 @@ npm install --silent 2>&1 | tail -3
 log_ok "Frontend dependencies installed"
 cd ..
 
-# ── Step 7: Create .env if needed ───────────────────────
+# ── Step 8: Electron desktop app dependencies ──────────
+
+log_step "Setting up Electron desktop app..."
+npm install --silent 2>&1 | tail -3
+log_ok "Electron dependencies installed"
+
+# ── Step 9: Create .env if needed ───────────────────────
 
 if [ ! -f .env ]; then
     cp .env.example .env
@@ -146,7 +163,10 @@ echo -e "\n${GREEN}${BOLD}══════════════════
 echo -e "${GREEN}${BOLD}  ✅ Aria is ready!${NC}"
 echo -e "${GREEN}${BOLD}══════════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${BOLD}To start Aria:${NC}"
+echo -e "  ${BOLD}To start Aria (desktop app):${NC}"
+echo -e "    ${BLUE}npm run electron:dev${NC}"
+echo ""
+echo -e "  ${BOLD}To start Aria (web app):${NC}"
 echo -e "    ${BLUE}./start.sh${NC}"
 echo ""
 echo -e "  ${BOLD}Or start manually:${NC}"

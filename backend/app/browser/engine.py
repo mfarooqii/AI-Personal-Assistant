@@ -1,24 +1,30 @@
 """
-Browser Engine — Playwright wrapper for local browser automation.
+Browser Engine — stealth Chromium automation via patchright (or Playwright).
 
-Manages a persistent Chromium instance with user sessions (cookies survive
-between restarts).  Provides atomic actions that the Browser Agent calls:
-navigate, click, type, scroll, screenshot, and DOM extraction.
+Two operating modes — auto-detected at first launch:
 
-Design choices:
-  - Persistent context  →  cookies/sessions survive, user only signs in once.
-  - Accessibility-tree extraction  →  gives AI a numbered element map that
-    any small text model can reason about (no vision model needed).
-  - JPEG screenshots at low quality  →  ~50-80 KB per frame, fast to stream.
-  - Viewport fixed at 1280×720  →  predictable element coordinates.
+  1. Electron mode  →  Aria is running as a desktop app.
+     All browser commands are forwarded to the Electron IPC bridge which
+     executes them on the *real*, user-visible BrowserView.  Zero headless
+     footprint, zero bot detection, user watches every action live.
+
+  2. Standalone mode  →  Aria is running as a plain web app.
+     Uses patchright (a stealth-patched Playwright fork) with a persistent
+     Chromium profile so sessions/cookies survive restarts.
+
+Both modes expose the same public API so the BrowserAgent never needs to
+know which mode is active.
 """
 
 import asyncio
 import base64
+import logging
 from pathlib import Path
 from typing import Optional
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────
 
@@ -94,19 +100,43 @@ class BrowserEngine:
     """
 
     def __init__(self) -> None:
-        self._playwright = None
-        self._context    = None
-        self._page       = None
-        self._launched   = False
+        self._playwright    = None
+        self._context       = None
+        self._page          = None
+        self._launched      = False
+        self._electron_mode = False  # True when delegating to Electron BrowserView
 
     # ── lifecycle ─────────────────────────────────────────
 
     async def launch(self) -> None:
-        """Start Chromium with a persistent user-data dir."""
+        """
+        Start the browser.
+
+        If the Electron IPC bridge is available (desktop app mode), the engine
+        delegates all actions to the live BrowserView — no headless instance
+        is started here.  Otherwise, patchright is launched with a persistent
+        profile (stealth-patched Chromium, no bot-detection flags).
+        """
         if self._launched:
             return
 
-        from playwright.async_api import async_playwright
+        # ── Check for Electron desktop mode first ──────────────────────────
+        from app.browser import electron_bridge  # local import to avoid circular deps
+        if await electron_bridge.is_available():
+            self._electron_mode = True
+            self._launched = True
+            log.info("BrowserEngine: Electron mode — using live BrowserView")
+            return
+
+        # ── Standalone mode: stealth Chromium via patchright ───────────────
+        self._electron_mode = False
+
+        try:
+            from patchright.async_api import async_playwright
+        except ImportError:
+            # Graceful fallback to plain playwright if patchright not installed
+            log.warning("patchright not installed — falling back to playwright (may be detected as bot)")
+            from playwright.async_api import async_playwright
 
         BROWSER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -117,13 +147,14 @@ class BrowserEngine:
             viewport=VIEWPORT,
             locale="en-US",
             timezone_id="America/New_York",
+            # patchright handles most stealth patches automatically;
+            # these args add an extra layer of compatibility
             args=[
-                "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
+                "--disable-dev-shm-usage",
             ],
         )
 
-        # Reuse the first page or create one
         if self._context.pages:
             self._page = self._context.pages[0]
         else:
@@ -131,17 +162,23 @@ class BrowserEngine:
 
         self._page.set_default_navigation_timeout(NAV_TIMEOUT)
         self._launched = True
+        log.info("BrowserEngine: standalone mode (patchright)")
 
     async def close(self) -> None:
-        """Shut down browser and Playwright."""
+        """Shut down browser and Playwright (no-op in Electron mode)."""
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.hide()
+            self._launched = False
+            return
         if self._context:
             await self._context.close()
         if self._playwright:
             await self._playwright.stop()
-        self._context = None
-        self._page = None
+        self._context   = None
+        self._page      = None
         self._playwright = None
-        self._launched = False
+        self._launched  = False
 
     @property
     def is_running(self) -> bool:
@@ -165,18 +202,35 @@ class BrowserEngine:
     async def navigate(self, url: str) -> dict:
         """Go to *url* and wait for the page to become interactive."""
         await self.launch()
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.navigate(url)
+            state = await electron_bridge.get_page_state()
+            return {"url": state.get("url", url), "title": state.get("title", "")}
         try:
-            resp = await self._page.goto(url, wait_until="domcontentloaded")
+            await self._page.goto(url, wait_until="domcontentloaded")
             await self._page.wait_for_load_state("networkidle", timeout=10_000)
         except Exception:
             pass  # networkidle can timeout on heavy pages — that's fine
         return {"url": self._page.url, "title": await self._page.title()}
 
     async def go_back(self) -> dict:
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.go_back()
+            await asyncio.sleep(1.0)
+            state = await electron_bridge.get_page_state()
+            return {"url": state.get("url", ""), "title": state.get("title", "")}
         await self._page.go_back(wait_until="domcontentloaded")
         return {"url": self._page.url, "title": await self._page.title()}
 
     async def reload(self) -> dict:
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.reload()
+            await asyncio.sleep(1.5)
+            state = await electron_bridge.get_page_state()
+            return {"url": state.get("url", ""), "title": state.get("title", "")}
         await self._page.reload(wait_until="domcontentloaded")
         return {"url": self._page.url, "title": await self._page.title()}
 
@@ -185,6 +239,9 @@ class BrowserEngine:
     async def screenshot(self) -> str:
         """Return a base64-encoded JPEG screenshot of the current viewport."""
         await self.launch()
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            return await electron_bridge.screenshot()
         buf = await self._page.screenshot(type="jpeg", quality=SCREENSHOT_QUALITY)
         return base64.b64encode(buf).decode()
 
@@ -205,6 +262,9 @@ class BrowserEngine:
             }
         """
         await self.launch()
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            return await electron_bridge.get_page_state()
         try:
             state = await self._page.evaluate(_EXTRACT_ELEMENTS_JS)
         except Exception:
@@ -224,12 +284,19 @@ class BrowserEngine:
         el = next((e for e in state["elements"] if e["id"] == element_id), None)
         if not el:
             return False
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            return await electron_bridge.click(el["x"], el["y"])
         await self._page.mouse.click(el["x"], el["y"])
         await asyncio.sleep(DEFAULT_WAIT / 1000)
         return True
 
     async def click_coordinates(self, x: int, y: int) -> None:
         """Click at raw viewport coordinates (for user clicks on screenshot)."""
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.click(x, y)
+            return
         await self._page.mouse.click(x, y)
         await asyncio.sleep(DEFAULT_WAIT / 1000)
 
@@ -243,21 +310,37 @@ class BrowserEngine:
             if not clicked:
                 return False
             await asyncio.sleep(0.3)
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            return await electron_bridge.type_text(text)
         await self._page.keyboard.type(text, delay=50)
         return True
 
     async def press_key(self, key: str) -> None:
         """Press a special key: Enter, Tab, Escape, Backspace, ArrowDown, …"""
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.press_key(key)
+            return
         await self._page.keyboard.press(key)
         await asyncio.sleep(DEFAULT_WAIT / 1000)
 
     async def select_all_and_type(self, text: str) -> None:
         """Select all text in the focused field and replace it."""
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.press_key("Control+a")
+            await electron_bridge.type_text(text)
+            return
         await self._page.keyboard.press("Control+a")
         await self._page.keyboard.type(text, delay=50)
 
     async def scroll(self, direction: str = "down", amount: int = 500) -> None:
         """Scroll the page. direction: 'up' | 'down'."""
+        if self._electron_mode:
+            from app.browser import electron_bridge
+            await electron_bridge.scroll(direction)
+            return
         delta = amount if direction == "down" else -amount
         await self._page.mouse.wheel(0, delta)
         await asyncio.sleep(DEFAULT_WAIT / 1000)

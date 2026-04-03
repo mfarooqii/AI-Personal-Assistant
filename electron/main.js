@@ -26,8 +26,14 @@ const BrowserViewManager = require('./browser-view')
 
 const BACKEND_PORT   = 8000
 const IPC_PORT       = 8001          // Python backend → Electron browser control
+const CDP_PORT       = 9222          // Chrome DevTools Protocol for browser-use
 const FRONTEND_URL   = 'http://localhost:3000'
 const IS_DEV         = process.env.NODE_ENV !== 'production'
+
+// Enable CDP so browser-use (Python) can connect to the real visible BrowserView
+// and drive it directly — user watches every action live, zero bot detection.
+app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT))
+app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -60,18 +66,23 @@ app.on('before-quit', cleanup)
 // ── Backend ───────────────────────────────────────────────────────────────────
 
 function startBackend() {
-  const pythonBin = IS_DEV
-    ? path.join(__dirname, '..', 'backend', 'venv', 'bin', 'python')
-    : path.join(process.resourcesPath, 'backend', 'venv', 'bin', 'python')
+  // Use .venv/bin/uvicorn — the active virtual environment for this project.
+  // Using the uvicorn binary directly ensures all venv packages are on sys.path.
+  const uvicornBin = IS_DEV
+    ? path.join(__dirname, '..', 'backend', '.venv', 'bin', 'uvicorn')
+    : path.join(process.resourcesPath, 'backend', '.venv', 'bin', 'uvicorn')
 
   const backendCwd = IS_DEV
     ? path.join(__dirname, '..', 'backend')
     : path.join(process.resourcesPath, 'backend')
 
   backendProcess = spawn(
-    pythonBin,
-    ['-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', String(BACKEND_PORT)],
-    { cwd: backendCwd, env: { ...process.env } }
+    uvicornBin,
+    ['app.main:app', '--host', '0.0.0.0', '--port', String(BACKEND_PORT)],
+    {
+      cwd: backendCwd,
+      env: { ...process.env },
+    }
   )
 
   backendProcess.stdout.on('data', d => process.stdout.write(`[backend] ${d}`))
@@ -190,6 +201,9 @@ function startIpcServer() {
           case '/browser/hide':
             browserManager.hide()
             mainWindow?.webContents.send('BROWSER_DEACTIVATED')
+            break
+          case '/browser/cdp-url':
+            result = { url: `http://127.0.0.1:${CDP_PORT}` }
             break
           case '/browser/back':
             await browserManager.goBack()

@@ -1,0 +1,47 @@
+FROM qwen2.5:latest
+
+# ── Context ────────────────────────────────────────────────────────────────────
+# Doubled from default 32768 → 65536.
+# Browser pages with large DOM trees can have 200+ elements in the accessibility
+# map. More context = agent sees the full page, not a truncated version.
+PARAMETER num_ctx 65536
+
+# ── Sampling — deterministic, precise tool calls ───────────────────────────────
+# Temperature 0: no randomness. Browser actions must be correct every time.
+# A stochastic model might click element 12 instead of 11 due to sampling noise.
+PARAMETER temperature 0
+
+# Keep only the top 20 token candidates — tight focus, fewer hallucinations.
+PARAMETER top_k 20
+
+# Nucleus sampling: only consider tokens comprising top 90% of probability mass.
+PARAMETER top_p 0.9
+
+# Penalise repetition — stops the model looping the same action endlessly.
+PARAMETER repeat_penalty 1.15
+PARAMETER repeat_last_n 64
+
+# Cap output length. Browser actions are short JSON, not essays.
+# Keeps latency low between steps.
+PARAMETER num_predict 512
+
+# ── System prompt ─────────────────────────────────────────────────────────────
+# Pre-baked into the model so every conversation starts with browser context.
+# browser-use overrides this per-task, but this ensures fallback behaviour is sane.
+SYSTEM """You are a precise browser automation agent. Your job is to control a real web browser on behalf of the user.
+
+You will receive:
+- The user's goal
+- A numbered list of interactive elements currently visible on the page
+- The current page URL and title
+
+You must respond with a single tool call to take the next action toward the goal. 
+
+Rules:
+- Always choose the most direct action toward the goal
+- Prefer clicking visible elements over navigating by URL
+- If a login page appears and you have credentials, fill them in
+- If you are unsure which element to use, pick the most likely one and proceed
+- Never repeat the same failed action more than twice — try a different approach
+- When the goal is complete, call the done() tool with a summary of what was accomplished
+- Be concise in your reasoning — one sentence maximum before the tool call"""

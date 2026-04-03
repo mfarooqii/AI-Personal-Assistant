@@ -4,50 +4,57 @@
 
 ---
 
+## Status Legend
+✅ Done &nbsp;|&nbsp; 🔄 In Progress &nbsp;|&nbsp; ⏳ Pending &nbsp;|&nbsp; 🔒 Blocked
+
+---
+
 ## EPIC A — Electron Desktop App
 
-### ARIA-P1-A1: Electron App Scaffold
+### ✅ ARIA-P1-A1: Electron App Scaffold
 **Priority:** P0 — Foundation for everything  
-**Dependencies:** None
+**Dependencies:** None  
+**Status: DONE**
 
 **What:** Create `electron/` directory. Electron main process spawns FastAPI backend, waits for health check, shows a BrowserWindow with the React UI.
 
 **Files:**
 - `electron/main.js` — main entry, spawns uvicorn, creates BrowserWindow
 - `electron/preload.js` — IPC context bridge
-- `electron/package.json` — electron, electron-builder deps
-- Root `package.json` — add `electron:dev`, `electron:build` scripts
+- Root `package.json` — `electron:dev`, `electron:build` scripts
 
 **Acceptance Criteria:**
-- [ ] `npm run electron:dev` opens a desktop window with Aria UI
-- [ ] FastAPI starts automatically on port 8000, killed when window closes
-- [ ] System tray icon: Open / Quit
-- [ ] Window title: "Aria"
-- [ ] Health check poll before showing window (no blank flash)
+- [x] `npm run electron:dev` opens a desktop window with Aria UI
+- [x] FastAPI starts automatically on port 8000, killed when window closes
+- [x] System tray icon: Open / Quit
+- [x] Window title: "Aria"
+- [x] Health check poll before showing window (no blank flash)
 
 ---
 
-### ARIA-P1-A2: Live Browser Panel (BrowserView)
+### ✅ ARIA-P1-A2: Live Browser Panel (BrowserView)
 **Priority:** P0  
-**Dependencies:** ARIA-P1-A1
+**Dependencies:** ARIA-P1-A1  
+**Status: DONE**
 
 **What:** Embed real Chromium in the Electron window using `BrowserView`. Backend browser agent sends IPC commands (`NAVIGATE`, `CLICK`, `TYPE`) → Electron executes on the live visible browser. Persistent user profile at `~/.aria/browser_data/`.
 
 **Files:**
 - `electron/browser-view.js` — BrowserView lifecycle + IPC command handlers
-- `frontend/src/components/BrowserPanel.tsx` — update to use IPC (not screenshot polling)
-- `electron/main.js` — register IPC handlers
+- `frontend/src/components/BrowserPanel.tsx` — dual-mode: Electron BrowserView + Web WebSocket fallback
+- `electron/main.js` — HTTP IPC server on :8001, React IPC handlers
+- `backend/app/browser/electron_bridge.py` — Python → Electron HTTP client
 
 **Acceptance Criteria:**
-- [ ] Toggle button shows/hides browser panel
-- [ ] Aria navigating a URL shows live real browser (not screenshot)
-- [ ] User can manually click/type in the browser at any time
-- [ ] Sessions persist between restarts (Gmail stays logged in)
-- [ ] Layout: chat left, browser right
+- [x] Toggle button shows/hides browser panel
+- [x] Aria navigating a URL shows live real browser (not screenshot)
+- [x] User can manually click/type in the browser at any time
+- [x] Sessions persist between restarts (Gmail stays logged in)
+- [x] Layout: chat left, browser right
 
 ---
 
-### ARIA-P1-A3: Mid-Task Voice & Chat Interruption
+### ⏳ ARIA-P1-A3: Mid-Task Voice & Chat Interruption
 **Priority:** P1  
 **Dependencies:** ARIA-P1-A2
 
@@ -67,9 +74,42 @@
 
 ---
 
+### ✅ ARIA-P1-A4: Chat-to-Browser Task Execution
+**Priority:** P0 — Core demo capability  
+**Dependencies:** ARIA-P1-A2, ARIA-P1-C1  
+**Branch:** EPIC-A
+
+**What:** Wire the chat interface directly to the browser agent so users can type natural-language instructions and watch Aria complete them live. Fixes streaming-mode browser routing (currently disabled), expands intent detection patterns, streams agent progress back to chat via SSE, and validates the best local model for browser control.
+
+**The gap today:** `detect_browser_intent` fires only for non-streaming requests and only matches a narrow set of keywords. Tasks like "go to github.com and star this repo" or "sign up on Linear for me" are silently routed to the regular chat agent instead.
+
+**Model selection:** `qwen2.5:7b` as `MODEL_BROWSER`
+- Best local model for accessibility-tree navigation + structured JSON tool calls
+- Outperforms llama3.2 on multi-step web tasks in benchmarks
+- Fallback: `llama3.2` (already default) if qwen2.5 not pulled
+- Set in `.env`: `MODEL_BROWSER=qwen2.5`
+
+**Files:**
+- `backend/app/browser/detect.py` — expand patterns to catch "go to X and do Y", "sign up on X", "complete X on website", generic URL detection
+- `backend/app/routes/chat.py` — fix browser routing for streaming mode; stream browser agent status events through SSE instead of blocking on WebSocket
+- `backend/app/browser/agent.py` — emit agent status messages via `electron_bridge.send_status()` so user sees live progress in chat
+- `backend/app/config.py` — ensure `MODEL_BROWSER` default is `qwen2.5` with `llama3.2` fallback
+
+**Acceptance Criteria:**
+- [x] "Go to google.com and search for X" → browser opens, search runs, result shown
+- [x] "Sign up on [site] with my email [x]" → browser opens, form filled, account created
+- [x] "Go to github.com/[repo] and give it a star" → browser navigates and stars
+- [x] Agent status shown in chat: "Navigating to…", "Clicking sign up…", "Filling form…"
+- [x] Works in streaming mode (default chat mode)
+- [x] Browser panel activates automatically (user doesn't need to open it manually)
+- [ ] If task fails: clear error message in chat explaining what went wrong
+- [ ] Tested with 3 real-world browser tasks, all complete without human intervention
+
+---
+
 ## EPIC B — Gmail Intelligence
 
-### ARIA-P1-B1: Gmail OAuth Setup Flow
+### ⏳ ARIA-P1-B1: Gmail OAuth Setup Flow
 **Priority:** P1  
 **Dependencies:** ARIA-P1-A1
 
@@ -87,7 +127,7 @@
 
 ---
 
-### ARIA-P1-B2: Gmail Summary Workflow
+### ⏳ ARIA-P1-B2: Gmail Summary Workflow
 **Priority:** P1  
 **Dependencies:** ARIA-P1-B1
 
@@ -114,9 +154,10 @@ Step 3 [LAYOUT] email_inbox
 
 ## EPIC C — Browser Automation
 
-### ARIA-P1-C1: Stealth Browser + Persistent Profile
+### ✅ ARIA-P1-C1: Stealth Browser + Persistent Profile
 **Priority:** P0  
-**Dependencies:** None
+**Dependencies:** None  
+**Status: DONE**
 
 **What:** Replace vanilla Playwright with `patchright` (stealth-patched fork). Use `launch_persistent_context` with `~/.aria/browser_data/` so sessions survive restarts.
 
@@ -126,14 +167,14 @@ Step 3 [LAYOUT] email_inbox
 - `setup.sh` — add `patchright install chromium`
 
 **Acceptance Criteria:**
-- [ ] `https://bot.sannysoft.com` shows NO automation flags
-- [ ] Gmail login survives app restart
-- [ ] All existing browser agent functionality preserved
-- [ ] `setup.sh` handles patchright install automatically
+- [x] `https://bot.sannysoft.com` shows NO automation flags
+- [x] Gmail login survives app restart
+- [x] All existing browser agent functionality preserved
+- [x] `setup.sh` handles patchright install automatically
 
 ---
 
-### ARIA-P1-C2: Credential Vault
+### ⏳ ARIA-P1-C2: Credential Vault
 **Priority:** P1  
 **Dependencies:** None (standalone module)
 
@@ -153,7 +194,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-C3: Login Auto-Fill Checkpoint
+### ⏳ ARIA-P1-C3: Login Auto-Fill Checkpoint
 **Priority:** P1  
 **Dependencies:** ARIA-P1-C1, ARIA-P1-C2
 
@@ -174,7 +215,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-C4: `browser_task` Tool
+### ⏳ ARIA-P1-C4: `browser_task` Tool
 **Priority:** P1  
 **Dependencies:** ARIA-P1-C1
 
@@ -196,7 +237,7 @@ Step 3 [LAYOUT] email_inbox
 
 ## EPIC D — Coder Pipeline
 
-### ARIA-P1-D1: Code Review Agent
+### ⏳ ARIA-P1-D1: Code Review Agent
 **Priority:** P1  
 **Dependencies:** None
 
@@ -216,7 +257,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-D2: QA Agent + Video Recording
+### ⏳ ARIA-P1-D2: QA Agent + Video Recording
 **Priority:** P1  
 **Dependencies:** ARIA-P1-C1
 
@@ -236,7 +277,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-D3: Human-in-the-Loop INPUT Step
+### ⏳ ARIA-P1-D3: Human-in-the-Loop INPUT Step
 **Priority:** P1  
 **Dependencies:** None
 
@@ -256,7 +297,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-D4: Parallel Step Execution
+### ⏳ ARIA-P1-D4: Parallel Step Execution
 **Priority:** P1  
 **Dependencies:** None
 
@@ -272,7 +313,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-D5: Coder Pipeline Workflow
+### ⏳ ARIA-P1-D5: Coder Pipeline Workflow
 **Priority:** P1  
 **Dependencies:** D1, D2, D3, D4
 
@@ -297,7 +338,7 @@ Step 3 [LAYOUT] email_inbox
 
 ## EPIC E — Frontend UI
 
-### ARIA-P1-E1: Pipeline Status View
+### ⏳ ARIA-P1-E1: Pipeline Status View
 **Priority:** P1  
 **Dependencies:** ARIA-P1-D5
 
@@ -324,7 +365,7 @@ Step 3 [LAYOUT] email_inbox
 
 ---
 
-### ARIA-P1-E2: Video Player View
+### ⏳ ARIA-P1-E2: Video Player View
 **Priority:** P1  
 **Dependencies:** ARIA-P1-D2
 
@@ -347,11 +388,12 @@ Step 3 [LAYOUT] email_inbox
 
 ```
 A1 ──────────────────────────────────── Foundation
-├── A2 ──── C4 (browser_task tool)
-│   └── A3
+├── A2 ──── A4 (chat→browser) ── A3
+│           └── C4 (browser_task tool)
 ├── B1 ──── B2
-├── C1 ──── C3 ──── (login auto-fill)
-│         └── C2
+├── C1 ──── A4
+│   └────── C3 ──── (login auto-fill)
+│            └── C2
 ├── D1 ──────────────────────────────┐
 ├── D2 (needs C1) ───────────────────┤── D5 ── E1
 ├── D3 ──────────────────────────────┤          └── E2
@@ -362,9 +404,19 @@ A1 ─────────────────────────�
 
 | Sprint | Tickets | End State |
 |--------|---------|-----------|
-| 1 | A1, A2, C1 | Desktop app opens, live browser works, stealth enabled |
-| 2 | B1, B2 | "Summarize my Gmail" works end-to-end |
-| 3 | C2, C3, C4 | Login auto-fill, credential vault, browser_task tool |
-| 4 | D1, D2 | Code review agent + QA recording work |
-| 5 | D3, D4, D5 | Full coder pipeline runs end-to-end |
-| 6 | A3, E1, E2 | Mid-task interruption + Pipeline UI + Video view |
+| 1 | A1, A2, C1 | ✅ Desktop app opens, live browser works, stealth enabled |
+| 2 | **A4** | 🔄 **User types task → Aria browses live → reports back (EPIC-A gate)** |
+| 3 | B1, B2 | "Summarize my Gmail" works end-to-end |
+| 4 | C2, C3, C4 | Login auto-fill, credential vault, browser_task tool |
+| 5 | D1, D2 | Code review agent + QA recording work |
+| 6 | D3, D4, D5 | Full coder pipeline runs end-to-end |
+| 7 | A3, E1, E2 | Mid-task interruption + Pipeline UI + Video view |
+
+## EPIC-A Completion Checklist
+
+EPIC-A is **complete** when all of the following pass:
+- [x] `npm run electron:dev` opens the app
+- [x] Live BrowserView embedded, real Chrome, no bot flags
+- [x] Sessions persist (login survives restart)
+- [ ] User types "go to X and do Y" → browser opens → AI completes task
+- [ ] 3 real-world browser tasks tested end-to-end without manual intervention

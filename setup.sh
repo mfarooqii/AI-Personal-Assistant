@@ -114,8 +114,8 @@ done
 
 log_step "Setting up backend..."
 cd backend
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source ..venv/bin/activate
 pip install -q -r requirements.txt
 log_ok "Backend dependencies installed"
 cd ..
@@ -124,7 +124,7 @@ cd ..
 
 log_step "Installing stealth browser (patchright)..."
 cd backend
-source venv/bin/activate
+source ..venv/bin/activate
 # patchright is a stealth-patched Playwright fork — bypasses bot detection
 python -m patchright install chromium 2>&1 | tail -3 || log_warn "patchright chromium install failed — browser agent may be detected as bot"
 log_ok "Stealth browser ready"
@@ -170,7 +170,7 @@ echo -e "  ${BOLD}To start Aria (web app):${NC}"
 echo -e "    ${BLUE}./start.sh${NC}"
 echo ""
 echo -e "  ${BOLD}Or start manually:${NC}"
-echo -e "    Backend:  ${BLUE}cd backend && source venv/bin/activate && uvicorn app.main:app --reload${NC}"
+echo -e "    Backend:  ${BLUE}cd backend && source ..venv/bin/activate && uvicorn app.main:app --reload${NC}"
 echo -e "    Frontend: ${BLUE}cd frontend && npm run dev${NC}"
 echo ""
 echo -e "  Then open ${BOLD}http://localhost:3000${NC} in your browser."

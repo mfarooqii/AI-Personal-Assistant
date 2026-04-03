@@ -54,6 +54,23 @@ def reset_detection() -> None:
 
 # ── Browser commands ──────────────────────────────────────────────────────────
 
+async def get_cdp_url() -> str | None:
+    """
+    Return the CDP endpoint URL for Electron's Chromium.
+    browser-use connects here to drive the real visible BrowserView.
+    Returns None if not running in Electron mode.
+    """
+    if not await is_available():
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{ELECTRON_IPC_URL}/browser/cdp-url")
+            return resp.json().get("url")
+    except Exception as e:
+        log.error("electron_bridge.get_cdp_url: %s", e)
+        return None
+
+
 async def go_back() -> bool:
     """Navigate the BrowserView back in history."""
     try:

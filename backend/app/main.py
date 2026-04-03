@@ -7,10 +7,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.utils.logger import setup_logging
 from app.memory.database import init_db
 from app.routes import chat, tasks, memory, voice, settings as settings_routes, workflows
-from app.routes import onboarding, integrations, browser, extension
+from app.routes import onboarding, integrations, browser, extension, logs as logs_routes
 from app.scheduler.engine import scheduler
+
+# Initialise logging before anything else so all startup messages are captured
+setup_logging(settings.DATA_DIR / "logs", debug=settings.DEBUG)
 
 
 @asynccontextmanager
@@ -47,7 +51,8 @@ app.include_router(workflows.router, prefix="/api/workflows", tags=["workflows"]
 app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["integrations"])
 app.include_router(browser.router, prefix="/api/browser", tags=["browser"])
-app.include_router(extension.router, prefix="/api/extension", tags=["extension"])
+app.include_router(extension.router,      prefix="/api/extension",    tags=["extension"])
+app.include_router(logs_routes.router,    prefix="/api/logs",         tags=["logs"])
 
 
 @app.get("/api/health")

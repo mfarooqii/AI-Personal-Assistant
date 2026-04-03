@@ -32,5 +32,11 @@ edge-tts==7.*
 # ── Scheduler (lightweight, no Redis needed) ──
 # Built-in asyncio scheduler, no extra deps needed
 
+# ── Logging ──
+loguru>=0.7.*
+
+# ── Logging ──
+loguru>=0.7.*
+
 # ── Dev ──
 python-multipart==0.0.*

@@ -355,3 +355,68 @@ export async function closeBrowser(): Promise<{ status: string }> {
   const res = await fetch(`${BASE}/browser/close`, { method: 'POST' });
   return res.json();
 }
+
+// ── Logs ──
+
+export type LogFormat = 'raw' | 'human' | 'ai';
+
+export interface LogEntry {
+  id: number;
+  timestamp: string;
+  /** Only present in human / ai formats */
+  time_ago?: string;
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'SUCCESS';
+  module: string;
+  /** Friendly module name — only in human / ai formats */
+  component?: string;
+  function: string;
+  line: number;
+  // All formats: the message (humanized in human/ai formats)
+  message: string;
+  // ai format only
+  summary?: string;
+  likely_cause?: string | null;
+  suggested_action?: string | null;
+  technical_detail?: string;
+  is_actionable?: boolean;
+  // frontend-only fields
+  stack?: string;
+  url?: string;
+}
+
+interface LogQuery {
+  format?: LogFormat;
+  limit?: number;
+  level?: string;
+  search?: string;
+  after_id?: number;
+}
+
+async function _fetchLogs(
+  path: 'backend' | 'frontend',
+  q: LogQuery = {},
+): Promise<{ logs: LogEntry[]; total: number; source: string; format: string }> {
+  const qs = new URLSearchParams();
+  if (q.format)             qs.set('format',   q.format);
+  if (q.limit)              qs.set('limit',    String(q.limit));
+  if (q.level)              qs.set('level',    q.level);
+  if (q.search)             qs.set('search',   q.search);
+  if (q.after_id !== undefined) qs.set('after_id', String(q.after_id));
+  const res = await fetch(`${BASE}/logs/${path}?${qs}`);
+  if (!res.ok) throw new Error(`Logs fetch failed: ${res.statusText}`);
+  return res.json();
+}
+
+export const getBackendLogs  = (q?: LogQuery) => _fetchLogs('backend',  q);
+export const getFrontendLogs = (q?: LogQuery) => _fetchLogs('frontend', q);
+
+export async function clearLogs(): Promise<void> {
+  await fetch(`${BASE}/logs`, { method: 'DELETE' });
+}
+
+/** @deprecated use getBackendLogs() */
+export async function getLogs(params?: {
+  limit?: number; level?: string; search?: string; after_id?: number;
+}): Promise<{ logs: LogEntry[]; total: number }> {
+  return getBackendLogs(params);
+}

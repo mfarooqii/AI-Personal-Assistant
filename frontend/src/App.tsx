@@ -3,13 +3,14 @@ import { ChatView } from './components/ChatView'
 import { Sidebar } from './components/Sidebar'
 import { HomeView } from './components/HomeView'
 import { OnboardingView } from './components/OnboardingView'
+import { LogsView } from './components/LogsView'
 import { DashboardRenderer, isAdaptiveLayout } from './components/DashboardRenderer'
 import { BrowserPanel } from './components/BrowserPanel'
 import { Menu } from 'lucide-react'
 import { getOnboardingStatus, closeBrowser } from './api'
 import type { LayoutDirective } from './api'
 
-export type View = 'loading' | 'onboarding' | 'home' | 'chat';
+export type View = 'loading' | 'onboarding' | 'home' | 'chat' | 'logs';
 
 export default function App() {
   const [view, setView] = useState<View>('loading');
@@ -110,7 +111,9 @@ export default function App() {
           onNewChat={startNewChat}
           onOpenConversation={openConversation}
           onGoHome={() => { setView('home'); setActiveLayout(null); setSidebarOpen(false); }}
+          onOpenLogs={() => { setView('logs'); setActiveLayout(null); setSidebarOpen(false); }}
           activeConversationId={conversationId}
+          activeView={view}
         />
       </div>
 
@@ -139,6 +142,8 @@ export default function App() {
             }}
             initialMessage=""
           />
+        ) : view === 'logs' ? (
+          <LogsView />
         ) : (
           /* Split panel: Chat + Adaptive Dashboard / Browser */
           <div className="flex-1 flex min-h-0">

@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Plus, MessageSquare, Home, Settings, Brain } from 'lucide-react';
+import { Plus, MessageSquare, Home, Settings, Brain, Terminal } from 'lucide-react';
 import { getConversations, type Conversation } from '../api';
 
 interface Props {
   onNewChat: () => void;
   onOpenConversation: (id: string) => void;
   onGoHome: () => void;
+  onOpenLogs: () => void;
   activeConversationId?: string;
+  activeView?: string;
 }
 
-export function Sidebar({ onNewChat, onOpenConversation, onGoHome, activeConversationId }: Props) {
+export function Sidebar({ onNewChat, onOpenConversation, onGoHome, onOpenLogs, activeConversationId, activeView }: Props) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
   useEffect(() => {
@@ -35,8 +37,11 @@ export function Sidebar({ onNewChat, onOpenConversation, onGoHome, activeConvers
       <div className="px-3 space-y-1">
         <button
           onClick={onGoHome}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5
-                     text-white/60 hover:text-white/90 transition-all text-sm"
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm ${
+            activeView === 'home'
+              ? 'bg-white/8 text-white/90'
+              : 'hover:bg-white/5 text-white/60 hover:text-white/90'
+          }`}
         >
           <Home size={16} />
           Home
@@ -48,6 +53,17 @@ export function Sidebar({ onNewChat, onOpenConversation, onGoHome, activeConvers
         >
           <Plus size={16} />
           New Chat
+        </button>
+        <button
+          onClick={onOpenLogs}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm ${
+            activeView === 'logs'
+              ? 'bg-white/8 text-white/90'
+              : 'hover:bg-white/5 text-white/60 hover:text-white/90'
+          }`}
+        >
+          <Terminal size={16} />
+          System Logs
         </button>
       </div>
 

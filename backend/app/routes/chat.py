@@ -70,10 +70,16 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
         .where(Message.conversation_id == convo.id)
         .order_by(Message.created_at)
     )
-    history = [{"role": m.role, "content": m.content} for m in result.scalars().all()]
+    messages_raw = result.scalars().all()
+    history = [{"role": m.role, "content": m.content} for m in messages_raw]
+    # Include agent info for browser continuation detection
+    recent_history = [
+        {"role": m.role, "content": m.content, "agent": m.model_used or ""}
+        for m in messages_raw[-6:]
+    ]
 
     # ── Browser intent — works in both streaming and non-streaming modes ──────
-    browser_intent = detect_browser_intent(req.message)
+    browser_intent = detect_browser_intent(req.message, recent_history)
     if browser_intent:
         if req.stream:
             return _stream_browser_task(req, convo, db)
@@ -200,7 +206,7 @@ def _stream_browser_task(req: ChatRequest, convo, db) -> StreamingResponse:
                 conversation_id=convo.id,
                 role="assistant",
                 content=full_result or "Browser task completed.",
-                model_used="browser-use",
+                model_used="browser",
             )
             db.add(assistant_msg)
             await db.commit()

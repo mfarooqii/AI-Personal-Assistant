@@ -33,6 +33,29 @@ DEFAULT_WAIT = 1_000               # ms after an action
 
 _EXTRACT_ELEMENTS_JS = """
 () => {
+    // Helper: find the visible label for an input element
+    function getLabel(n) {
+        // 1. aria-label / aria-labelledby
+        if (n.getAttribute('aria-label')) return n.getAttribute('aria-label');
+        const lbId = n.getAttribute('aria-labelledby');
+        if (lbId) {
+            const lb = document.getElementById(lbId);
+            if (lb) return lb.innerText.trim();
+        }
+        // 2. <label for="id">
+        if (n.id) {
+            const lb = document.querySelector('label[for="' + n.id + '"]');
+            if (lb) return lb.innerText.trim();
+        }
+        // 3. Wrapping <label>
+        const parent = n.closest('label');
+        if (parent) return parent.innerText.replace(n.value, '').trim();
+        // 4. Preceding sibling text
+        const prev = n.previousElementSibling;
+        if (prev && prev.tagName !== 'INPUT') return prev.innerText.trim().substring(0, 60);
+        return '';
+    }
+
     const items = [];
     const sel = 'a, button, input, textarea, select, [role="button"], '
               + '[role="link"], [role="tab"], [role="menuitem"], '
@@ -43,13 +66,15 @@ _EXTRACT_ELEMENTS_JS = """
     for (const n of nodes) {
         const r = n.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
-        if (r.bottom < 0 || r.top > window.innerHeight) continue;
+        if (r.bottom < 0 || r.top > window.innerHeight + 200) continue;
         const style = window.getComputedStyle(n);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
 
         const text = (n.innerText || n.textContent || '').trim().substring(0, 120);
         const tag  = n.tagName.toLowerCase();
         const role = n.getAttribute('role') || tag;
+        const label = (tag === 'input' || tag === 'textarea' || tag === 'select')
+                      ? getLabel(n) : '';
         items.push({
             id:   idx++,
             tag,
@@ -59,14 +84,18 @@ _EXTRACT_ELEMENTS_JS = """
                        || n.getAttribute('title')
                        || n.getAttribute('name')
                        || '',
+            label,
             x: Math.round(r.x + r.width  / 2),
             y: Math.round(r.y + r.height / 2),
             href:        n.getAttribute('href'),
-            input_type:  n.getAttribute('type'),
+            input_type:  n.getAttribute('type') || '',
             value:       n.value || '',
             placeholder: n.getAttribute('placeholder') || '',
             checked:     !!n.checked,
             disabled:    !!n.disabled,
+            required:    !!n.required,
+            name:        n.getAttribute('name') || '',
+            autocomplete: n.getAttribute('autocomplete') || '',
         });
     }
     return {
@@ -75,6 +104,47 @@ _EXTRACT_ELEMENTS_JS = """
         title: document.title,
         text:  document.body?.innerText?.substring(0, 4000) || '',
     };
+}
+"""
+
+# JS to extract only form fields (inputs) for the form analysis step
+_ANALYZE_FORMS_JS = """
+() => {
+    function getLabel(n) {
+        if (n.getAttribute('aria-label')) return n.getAttribute('aria-label');
+        const lbId = n.getAttribute('aria-labelledby');
+        if (lbId) { const lb = document.getElementById(lbId); if (lb) return lb.innerText.trim(); }
+        if (n.id) { const lb = document.querySelector('label[for="' + n.id + '"]'); if (lb) return lb.innerText.trim(); }
+        const parent = n.closest('label');
+        if (parent) return parent.innerText.replace(n.value || '', '').trim();
+        const prev = n.previousElementSibling;
+        if (prev) return prev.innerText.trim().substring(0, 60);
+        return n.getAttribute('placeholder') || n.getAttribute('name') || '';
+    }
+    const forms = [];
+    document.querySelectorAll('form').forEach((form, fi) => {
+        const fields = [];
+        form.querySelectorAll('input:not([type=hidden]), textarea, select').forEach(n => {
+            const r = n.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return;
+            fields.push({
+                label:        getLabel(n),
+                type:         n.type || n.tagName.toLowerCase(),
+                name:         n.name || '',
+                autocomplete: n.autocomplete || '',
+                required:     n.required,
+                current_value: n.value || '',
+                placeholder:  n.placeholder || '',
+            });
+        });
+        const submitBtn = form.querySelector('[type=submit], button:not([type=button])');
+        forms.push({
+            index: fi,
+            fields,
+            submit_button_text: submitBtn ? (submitBtn.innerText || submitBtn.value || 'Submit').trim() : '',
+        });
+    });
+    return forms;
 }
 """
 
@@ -237,14 +307,54 @@ class BrowserEngine:
         """
         Type *text* into the focused element, or into *element_id* if given.
         Simulates real keystrokes (important for login forms that watch input events).
+        Always clears the field first to avoid appending to existing content.
         """
         if element_id is not None:
             clicked = await self.click_element(element_id)
             if not clicked:
                 return False
             await asyncio.sleep(0.3)
+        # Clear existing content first, then type
+        await self._page.keyboard.press("Control+a")
+        await asyncio.sleep(0.1)
         await self._page.keyboard.type(text, delay=50)
         return True
+
+    async def analyze_forms(self) -> list[dict]:
+        """
+        Extract structured form information from the current page.
+        Returns a list of forms with their fields, types, labels, and current values.
+        Useful for the AI to understand what a page expects before filling it.
+        """
+        await self.launch()
+        try:
+            return await self._page.evaluate(_ANALYZE_FORMS_JS)
+        except Exception:
+            return []
+
+    async def fill_field(self, element_id: int, text: str) -> bool:
+        """
+        Fill a form field by setting its value directly (clears first).
+        Uses Playwright's locator.fill() which triggers input/change events.
+        Falls back to type_text if the element can't be located by selector.
+        Preferred over type_text for form inputs.
+        """
+        state = await self.get_page_state()
+        el = next((e for e in state["elements"] if e["id"] == element_id), None)
+        if not el:
+            return False
+        try:
+            # Try locating by coordinates — use Playwright locator at position
+            await self._page.mouse.click(el["x"], el["y"])
+            await asyncio.sleep(0.2)
+            await self._page.keyboard.press("Control+a")
+            await asyncio.sleep(0.1)
+            await self._page.keyboard.press("Delete")
+            await asyncio.sleep(0.1)
+            await self._page.keyboard.type(text, delay=40)
+            return True
+        except Exception:
+            return await self.type_text(text, element_id)
 
     async def press_key(self, key: str) -> None:
         """Press a special key: Enter, Tab, Escape, Backspace, ArrowDown, …"""

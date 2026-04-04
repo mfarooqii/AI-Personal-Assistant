@@ -20,7 +20,19 @@ google-auth-oauthlib>=1.*
 google-api-python-client>=2.*
 
 # ── Browser Agent ──
+# patchright is a stealth-patched Playwright fork — same API, bypasses
+# Cloudflare, Akamai, DataDome bot detection.  Falls back to playwright
+# automatically if not installed.
+patchright>=1.49.*
+# Keep playwright as fallback (patchright is a drop-in replacement)
 playwright>=1.49.*
+
+# browser-use: AI-driven browser automation framework
+# Connects to Electron's BrowserView via CDP so the user watches every action live.
+browser-use>=0.12.6
+langchain-ollama>=0.3.0
+# Pin starlette to version compatible with both fastapi and browser-use
+starlette>=0.40.0,<0.47.0
 
 # ── AI / Embeddings ──
 numpy==2.*

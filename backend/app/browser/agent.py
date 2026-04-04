@@ -35,7 +35,8 @@ BROWSER_MODEL = getattr(settings, "MODEL_BROWSER", None) or settings.MODEL_REASO
 class ActionKind(str, Enum):
     navigate       = "navigate"
     click          = "click"
-    type           = "type"
+    fill           = "fill"        # clear-then-fill a form field (preferred for inputs)
+    type           = "type"        # append-style typing (use fill instead for form inputs)
     press_key      = "press_key"
     scroll         = "scroll"
     extract        = "extract"
@@ -101,43 +102,47 @@ Rules:
 
 NAVIGATOR_PROMPT = """You are a browser automation agent. You control a web browser to complete tasks for the user.
 
-Current task: {task}
-Current plan step: {plan_step}
+Overall task: {task}
+Current step goal: {plan_step}
 
 Page info:
   URL:   {url}
   Title: {title}
 
-Interactive elements on screen:
+Form fields on this page (IMPORTANT — check current_value before filling):
+{forms}
+
+Interactive elements on screen (id → type label/text [current_value if input]):
 {elements}
 
 Visible text (truncated):
 {page_text}
 
-History of actions taken so far:
+Actions already taken:
 {action_history}
+
+Instructions:
+1. Use "fill" (NOT "type") for ALL input/textarea fields — fill clears first then sets value.
+2. BEFORE filling any field, check its current_value. If current_value already matches what you need, DO NOT fill it again — skip to the next step (click Next/Submit).
+3. For multi-step forms (e.g. Google login: email → Next → password → Sign In), complete ONE field per turn then click the button to advance.
+4. Never repeat an action that's already in the action history unless the page state changed significantly.
+5. If you are stuck in a loop (same action 2+ times), try a different approach or use "wait_for_user".
+6. Use "click" for buttons, links, and checkboxes. Use "fill" for text inputs.
+7. After filling a field and clicking Next/Submit, WAIT for the page to load before acting again.
+8. If the task requires a value you don't have (e.g., a password was not provided), use "wait_for_user".
 
 Decide the SINGLE next action. Output JSON only:
 {{
-  "thought": "brief reasoning about what you see and what to do",
-  "action": "navigate|click|type|press_key|scroll|extract|wait_for_user|done|back",
-  "element_id": <int or null — which numbered element to interact with>,
-  "text": "<text to type, or URL for navigate>",
-  "key": "<key name for press_key: Enter, Tab, etc.>",
+  "thought": "what I see, what's already done, and why I'm doing this next action",
+  "action": "navigate|click|fill|press_key|scroll|extract|wait_for_user|done|back",
+  "element_id": <int or null>,
+  "text": "<text to fill/type, or URL for navigate>",
+  "key": "<key for press_key: Enter, Tab, Escape, etc.>",
   "direction": "<up or down for scroll>",
   "extracted_data": {{}}
 }}
 
-Rules:
-- If you see a login/sign-in page and user hasn't logged in yet, choose "wait_for_user" and explain what they need to do.
-- For search bars, first click the element, then type the query, then press Enter.
-- Use "extract" when you've reached the target data and want to pull it out.
-- Use "done" when the task is completely finished.
-- Use "scroll" to see more content below the fold.
-- Use "back" to go to previous page if you took a wrong turn.
-- When extracting email data, include: subject, from, date, snippet for each email.
-- When extracting product data, include: name, price, rating, reviews, url for each product.
-- ONLY output valid JSON. No markdown, no explanation outside the JSON.
+ONLY output valid JSON. No markdown, no explanation outside the JSON.
 """
 
 EXTRACTOR_PROMPT = """You are a data extraction agent. Extract structured data from this webpage content.
@@ -187,7 +192,8 @@ class BrowserAgent:
     def __init__(self, engine: BrowserEngine) -> None:
         self.engine = engine
         self._action_history: list[str] = []
-        self._max_actions = 25     # safety cap
+        self._max_actions = 30     # safety cap
+        self._last_actions: list[str] = []   # for loop detection
 
     async def plan_task(self, user_message: str) -> dict:
         """
@@ -270,10 +276,27 @@ class BrowserAgent:
                 total_actions=len(steps),
             )
 
+            self._last_actions = []   # reset loop detector per step
+
             # Inner action loop for this step
             for action_num in range(self._max_actions):
                 state = await self.engine.get_page_state()
-                action = await self._decide_action(task, step, state)
+                forms = await self.engine.analyze_forms()
+                action = await self._decide_action(task, step, state, forms)
+
+                # ── Loop detection: same action+element 3 times in a row ──
+                action_sig = f"{action.kind.value}:{action.element_id}:{action.text[:30]}"
+                self._last_actions.append(action_sig)
+                if len(self._last_actions) >= 3 and len(set(self._last_actions[-3:])) == 1:
+                    log.warning("Loop detected, breaking: %s", action_sig)
+                    yield BrowserEvent(
+                        type="interactive",
+                        message="I seem to be stuck. Could you check the page and tell me what to do next?",
+                        screenshot=await self.engine.screenshot(),
+                        url=state["url"],
+                        title=state["title"],
+                    )
+                    return
 
                 if action.kind == ActionKind.done:
                     break
@@ -314,7 +337,7 @@ class BrowserAgent:
                 )
 
                 # After some actions, give a short pause for page to settle
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.8)
 
         # If we get here without an explicit extract/done, do a final extraction
         state = await self.engine.get_page_state()
@@ -363,16 +386,18 @@ class BrowserAgent:
 
     # ── private helpers ──────────────────────────────────
 
-    async def _decide_action(self, task: str, step: str, state: dict) -> BrowserAction:
+    async def _decide_action(self, task: str, step: str, state: dict, forms: list[dict] | None = None) -> BrowserAction:
         """Ask the AI what to do next given the current page state."""
         elements_text = _format_elements(state.get("elements", []))
-        history_text = "\n".join(self._action_history[-8:]) or "(none yet)"
+        history_text = "\n".join(self._action_history[-10:]) or "(none yet)"
+        forms_text = _format_forms(forms or [])
 
         prompt = NAVIGATOR_PROMPT.format(
             task=task,
             plan_step=step,
             url=state.get("url", ""),
             title=state.get("title", ""),
+            forms=forms_text,
             elements=elements_text,
             page_text=state.get("text", "")[:3000],
             action_history=history_text,
@@ -436,8 +461,18 @@ class BrowserAgent:
         elif action.kind == ActionKind.click:
             if action.element_id:
                 await self.engine.click_element(action.element_id)
+        elif action.kind == ActionKind.fill:
+            # Preferred for form inputs — clears field first then fills
+            if action.element_id:
+                await self.engine.fill_field(action.element_id, action.text)
+            else:
+                await self.engine.type_text(action.text)
         elif action.kind == ActionKind.type:
-            await self.engine.type_text(action.text, action.element_id)
+            # Legacy append-style typing — redirects to fill_field if element_id given
+            if action.element_id:
+                await self.engine.fill_field(action.element_id, action.text)
+            else:
+                await self.engine.type_text(action.text)
         elif action.kind == ActionKind.press_key:
             await self.engine.press_key(action.key or "Enter")
         elif action.kind == ActionKind.scroll:
@@ -448,21 +483,50 @@ class BrowserAgent:
 
 # ── Utilities ─────────────────────────────────────────────
 
+def _format_forms(forms: list[dict]) -> str:
+    """Format form structure for the AI prompt."""
+    if not forms:
+        return "(no forms detected on this page)"
+    lines = []
+    for form in forms:
+        fields = form.get("fields", [])
+        submit = form.get("submit_button_text", "Submit")
+        lines.append(f"Form (submit: \"{submit}\"):")
+        for f in fields:
+            label = f.get("label") or f.get("placeholder") or f.get("name") or "?"
+            ftype = f.get("type", "text")
+            val = f.get("current_value", "")
+            req = " [required]" if f.get("required") else ""
+            val_str = f' current_value="{val}"' if val else " (empty)"
+            lines.append(f"  - {label} ({ftype}){req}{val_str}")
+    return "\n".join(lines)
+
+
 def _format_elements(elements: list[dict]) -> str:
     """Format numbered element list for the AI prompt."""
     if not elements:
         return "(no interactive elements found)"
     lines = []
     for el in elements[:60]:  # cap to keep prompt small
-        parts = [f"[{el['id']}]", el.get("role", el.get("tag", "?"))]
+        tag = el.get("tag", "?")
+        role = el.get("role", tag)
+        parts = [f"[{el['id']}]", role]
+        # Label takes priority for inputs
+        label = el.get("label", "")
         text = el.get("text", "")
-        if text:
-            parts.append(f'"{text}"')
+        display = label or text
+        if display:
+            parts.append(f'"{display}"')
         ph = el.get("placeholder", "")
-        if ph:
+        if ph and not label:
             parts.append(f'placeholder="{ph}"')
+        val = el.get("value", "")
+        if val and tag in ("input", "textarea", "select"):
+            parts.append(f'value="{val}"')   # show current value clearly
         if el.get("disabled"):
             parts.append("(disabled)")
+        if el.get("required"):
+            parts.append("(required)")
         if el.get("href"):
             parts.append(f'→ {el["href"][:80]}')
         lines.append(" ".join(parts))

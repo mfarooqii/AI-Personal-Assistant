@@ -129,7 +129,7 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
             await db.commit()
 
             layout = await classify_layout(req.message, full_content, agent.name)
-            yield f"data: {json.dumps({'done': True, 'agent': agent.name, 'layout': layout})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'agent': agent.name, 'layout': layout, 'conversation_id': str(convo.id)})}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -211,7 +211,7 @@ def _stream_browser_task(req: ChatRequest, convo, db) -> StreamingResponse:
         except Exception as e:
             log.error("Failed to save browser task result: %s", e)
 
-        yield f"data: {json.dumps({'done': True, 'agent': 'browser', 'layout': {'layout': 'browser', 'title': 'Browser Task'}})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'agent': 'browser', 'conversation_id': str(convo.id), 'layout': {'layout': 'browser', 'title': 'Browser Task'}})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Send, Mic, Bot, User, Loader2, PanelRightOpen } from 'lucide-react';
-import { sendMessage, getMessages, type ChatMessage, type LayoutDirective } from '../api';
+import { streamMessage, getMessages, type ChatMessage, type LayoutDirective } from '../api';
 import { isAdaptiveLayout } from './DashboardRenderer';
 
 interface Props {
@@ -48,33 +48,96 @@ export function ChatView({ conversationId, onConversationCreated, onLayoutChange
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setLoading(true);
 
-    try {
-      const resp = await sendMessage(text, conversationId);
-      if (!conversationId) {
-        onConversationCreated(resp.conversation_id);
-      }
-      setCurrentAgent(resp.agent);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: resp.content,
-          agent: resp.agent,
-          model: resp.model,
-          tool_calls: resp.tool_calls,
-          layout: resp.layout,
-        },
-      ]);
+    // Placeholder assistant message we'll update as tokens arrive
+    const assistantIdx = Date.now();
+    setMessages((prev) => [...prev, {
+      role: 'assistant' as const,
+      content: '',
+      agent: '',
+      _idx: assistantIdx,
+    } as any]);
 
-      // Trigger adaptive dashboard or browser if layout directive is present
-      if (resp.layout && onLayoutChange) {
-        onLayoutChange(resp.layout);
+    let content = '';
+    let agent = '';
+    let convId = conversationId;
+
+    try {
+      for await (const chunk of streamMessage(text, conversationId)) {
+        // ── browser_start: open the panel immediately, before task finishes ──
+        if ((chunk as any).type === 'browser_start') {
+          const task = (chunk as any).task || text;
+          onLayoutChange?.({ layout: 'browser', title: 'Browser', data: { task } });
+          if (!convId && (chunk as any).conversation_id) {
+            convId = (chunk as any).conversation_id;
+            onConversationCreated(convId!);
+          }
+          // Show a brief status line in chat
+          content = `🌐 Opening browser for: ${task}`;
+          setMessages((prev) => prev.map((m: any) =>
+            m._idx === assistantIdx ? { ...m, content, agent: 'browser' } : m
+          ));
+          continue;
+        }
+
+        // ── browser status/action updates: update chat message live ──
+        if ((chunk as any).type === 'status' || (chunk as any).type === 'action') {
+          const msg = (chunk as any).message || '';
+          if (msg) {
+            content = `🌐 ${msg}`;
+            setMessages((prev) => prev.map((m: any) =>
+              m._idx === assistantIdx ? { ...m, content, agent: 'browser' } : m
+            ));
+          }
+          continue;
+        }
+
+        // ── browser done/error: update chat with final result ──
+        if ((chunk as any).type === 'done' || (chunk as any).type === 'error') {
+          const result = (chunk as any).result || (chunk as any).message || '';
+          if (result) content = result;
+          setMessages((prev) => prev.map((m: any) =>
+            m._idx === assistantIdx ? { ...m, content, agent: 'browser' } : m
+          ));
+          continue;
+        }
+
+        // ── normal streaming token ──
+        if (chunk.token) {
+          content += chunk.token;
+          setMessages((prev) => prev.map((m: any) =>
+            m._idx === assistantIdx ? { ...m, content } : m
+          ));
+        }
+
+        // ── done event: finalize message + trigger layout ──
+        if (chunk.done) {
+          if (chunk.agent) {
+            agent = chunk.agent;
+            setCurrentAgent(chunk.agent);
+          }
+          if (chunk.layout && onLayoutChange) {
+            // Don't re-open browser panel if already opened by browser_start
+            if (chunk.layout.layout !== 'browser') {
+              onLayoutChange(chunk.layout);
+            }
+          }
+          // Stamp the final agent onto the message
+          setMessages((prev) => prev.map((m: any) =>
+            m._idx === assistantIdx ? { ...m, agent, layout: chunk.layout } : m
+          ));
+        }
+
+        if (!convId && (chunk as any).conversation_id) {
+          convId = (chunk as any).conversation_id;
+          onConversationCreated(convId!);
+        }
       }
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Sorry, something went wrong. Is the backend running?' },
-      ]);
+      setMessages((prev) => prev.map((m: any) =>
+        m._idx === assistantIdx
+          ? { ...m, content: 'Sorry, something went wrong. Is the backend running?' }
+          : m
+      ));
     } finally {
       setLoading(false);
     }

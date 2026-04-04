@@ -218,11 +218,18 @@ class BrowserEngine:
         self._launched = True
         log.info("BrowserEngine: standalone mode (patchright)")
 
-    async def close(self) -> None:
-        """Shut down browser and Playwright (no-op in Electron mode)."""
+    async def close(self, hide_browser: bool = False) -> None:
+        """
+        Shut down the browser engine.
+
+        In Electron mode the BrowserView stays visible by default so the user
+        can see the result and continue browsing manually.  Pass
+        ``hide_browser=True`` to explicitly hide it (e.g. on app quit).
+        """
         if self._electron_mode:
-            from app.browser import electron_bridge
-            await electron_bridge.hide()
+            if hide_browser:
+                from app.browser import electron_bridge
+                await electron_bridge.hide()
             self._launched = False
             return
         if self._context:

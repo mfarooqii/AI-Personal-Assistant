@@ -77,30 +77,32 @@ SHOW_ON_SITE = {"amazon.com", "ebay.com", "walmart.com", "etsy.com"}
 
 # ── Prompts ───────────────────────────────────────────────
 
-PLANNER_PROMPT = """You are an AI task planner for a browser automation agent.
-Given a user's request, determine:
-1. Which website to visit
-2. Whether the user is likely already signed in or needs to sign in
-3. Step-by-step plan to accomplish the task
+PLANNER_PROMPT = """You are a browser task planner. Given a user request, output a MINIMAL, LITERAL execution plan.
+
+CRITICAL RULES:
+- Only include steps for what the user EXPLICITLY asked. Never add assumed or follow-up steps.
+- If the user says "open X", "go to X", "visit X", or "navigate to X": the ONLY step is "Navigate to the website." Nothing else.
+- If the user asks to search for something ON a site: step 1 = navigate, step 2 = search. Two steps max.
+- If the user asks to login: step 1 = navigate to login page, step 2 = fill credentials, step 3 = click sign in.
+- Do NOT add steps like "browse products", "check results", "read emails" unless user explicitly asked.
+- extract_to_app = true ONLY when user asks to summarize/show data inside the app (emails, prices, etc.)
+- extract_to_app = false for everything else (just show the live browser)
 
 Output JSON only:
 {{
   "website": "https://...",
-  "needs_login": true/false,
-  "login_url": "https://... (only if needs_login is true)",
-  "plan": ["step 1", "step 2", ...],
-  "extract_to_app": true/false,
-  "reasoning": "brief explanation"
+  "needs_login": false,
+  "login_url": "",
+  "navigation_only": true/false,
+  "plan": ["step 1", "step 2"],
+  "extract_to_app": false,
+  "reasoning": "one line"
 }}
 
-Rules:
-- For email: use gmail.com, outlook.live.com, or mail.yahoo.com
-- For shopping: use amazon.com directly
-- extract_to_app = true for emails (we summarize in our app)
-- extract_to_app = false for shopping results (show on the actual site)
+navigation_only = true when user ONLY wants to open/visit a URL (no further actions needed).
 """
 
-NAVIGATOR_PROMPT = """You are a browser automation agent. You control a web browser to complete tasks for the user.
+NAVIGATOR_PROMPT = """You are a precise browser automation agent. You execute ONE action at a time.
 
 Overall task: {task}
 Current step goal: {plan_step}
@@ -109,40 +111,41 @@ Page info:
   URL:   {url}
   Title: {title}
 
-Form fields on this page (IMPORTANT — check current_value before filling):
+Form fields on this page (check current_value BEFORE filling):
 {forms}
 
-Interactive elements on screen (id → type label/text [current_value if input]):
+Interactive elements on screen:
 {elements}
 
 Visible text (truncated):
 {page_text}
 
-Actions already taken:
+Actions already taken this session:
 {action_history}
 
-Instructions:
-1. Use "fill" (NOT "type") for ALL input/textarea fields — fill clears first then sets value.
-2. BEFORE filling any field, check its current_value. If current_value already matches what you need, DO NOT fill it again — skip to the next step (click Next/Submit).
-3. For multi-step forms (e.g. Google login: email → Next → password → Sign In), complete ONE field per turn then click the button to advance.
-4. Never repeat an action that's already in the action history unless the page state changed significantly.
-5. If you are stuck in a loop (same action 2+ times), try a different approach or use "wait_for_user".
-6. Use "click" for buttons, links, and checkboxes. Use "fill" for text inputs.
-7. After filling a field and clicking Next/Submit, WAIT for the page to load before acting again.
-8. If the task requires a value you don't have (e.g., a password was not provided), use "wait_for_user".
+STRICT RULES:
+1. Do ONLY what the current step says. Do NOT anticipate future steps or do extra work.
+2. Use "fill" (NOT "type") for ALL input/textarea fields - fill clears first then sets the value.
+3. BEFORE filling any field, check its current_value. If it already matches what you need, SKIP IT and click the submit/next button instead.
+4. For multi-step forms (e.g. Google: email -> Next -> password -> Sign In), ONE action per turn.
+5. If the same action appears in action history already completed, DO NOT repeat it - move to next step.
+6. If stuck (same action 2+ times in a row), use "wait_for_user".
+7. If the current step is COMPLETE (e.g., you just navigated and step says "navigate"), output action "done".
+8. If the task only requires navigation and the page loaded successfully, output action "done" immediately.
+9. Only use "wait_for_user" if you genuinely need the user to do something (CAPTCHA, missing credentials).
 
-Decide the SINGLE next action. Output JSON only:
+Output the SINGLE next action as JSON only:
 {{
-  "thought": "what I see, what's already done, and why I'm doing this next action",
+  "thought": "what I see, what's done, why I'm doing this next",
   "action": "navigate|click|fill|press_key|scroll|extract|wait_for_user|done|back",
   "element_id": <int or null>,
-  "text": "<text to fill/type, or URL for navigate>",
+  "text": "<text to fill, or URL for navigate>",
   "key": "<key for press_key: Enter, Tab, Escape, etc.>",
   "direction": "<up or down for scroll>",
   "extracted_data": {{}}
 }}
 
-ONLY output valid JSON. No markdown, no explanation outside the JSON.
+ONLY output valid JSON. No markdown, no text outside the JSON.
 """
 
 EXTRACTOR_PROMPT = """You are a data extraction agent. Extract structured data from this webpage content.
@@ -200,6 +203,14 @@ class BrowserAgent:
         Ask the AI to create a browsing plan from the user's request.
         Returns a plan dict with website, steps, login info.
         """
+        fallback = {
+            "website": "",
+            "needs_login": False,
+            "navigation_only": False,
+            "plan": [user_message],
+            "extract_to_app": False,
+            "reasoning": "Could not parse plan, using direct approach",
+        }
         try:
             resp = await chat_completion(
                 model=BROWSER_MODEL,
@@ -211,16 +222,21 @@ class BrowserAgent:
             )
             content = resp.get("message", {}).get("content", "")
             content = _clean_json(content)
-            return json.loads(content)
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                return fallback
+            # Ensure required keys exist and are valid types
+            if not isinstance(parsed.get("plan"), list) or not parsed["plan"]:
+                parsed["plan"] = [user_message]
+            if not isinstance(parsed.get("website"), str):
+                parsed["website"] = ""
+            parsed.setdefault("needs_login", False)
+            parsed.setdefault("navigation_only", False)
+            parsed.setdefault("extract_to_app", False)
+            return parsed
         except Exception as e:
             log.warning("Plan parsing failed: %s", e)
-            return {
-                "website": "",
-                "needs_login": False,
-                "plan": [user_message],
-                "extract_to_app": True,
-                "reasoning": "Could not parse plan, using direct approach",
-            }
+            return fallback
 
     async def execute(
         self,
@@ -229,28 +245,37 @@ class BrowserAgent:
     ) -> AsyncGenerator[BrowserEvent, None]:
         """
         Execute a browsing task step by step, yielding events.
-
-        This is the main loop the WebSocket route iterates over::
-
-            async for event in agent.execute(task, plan):
-                await ws.send_json(asdict(event))
         """
         await self.engine.launch()
         self._action_history = []
         website = plan.get("website", "")
         steps = plan.get("plan", [task])
-        extract_to_app = plan.get("extract_to_app", True)
+        extract_to_app = plan.get("extract_to_app", False)
+        navigation_only = plan.get("navigation_only", False)
 
         # ── Step 1: Navigate to target website ────────────
         if website:
             yield BrowserEvent(type="status", message=f"Opening {website}...")
             nav = await self.engine.navigate(website)
             yield BrowserEvent(
-                type="screenshot",
-                screenshot=await self.engine.screenshot(),
+                type="status",
+                message=f"Loaded: {nav.get('title', nav.get('url', website))}",
                 url=nav["url"],
                 title=nav["title"],
             )
+
+        # ── Navigation-only fast path ──────────────────────
+        # If the plan is just "open this URL", stop here — don't run the AI loop
+        if navigation_only or (len(steps) == 1 and _is_navigation_step(steps[0])):
+            state = await self.engine.get_page_state()
+            yield BrowserEvent(
+                type="complete",
+                message=f"Opened {state.get('title', website)}.",
+                url=state.get("url", ""),
+                title=state.get("title", ""),
+                data={"summary": f"Navigated to {state.get('url', website)}"},
+            )
+            return
 
         # ── Step 2: Check if login is required ────────────
         if plan.get("needs_login"):
@@ -259,15 +284,14 @@ class BrowserAgent:
                 yield BrowserEvent(
                     type="interactive",
                     message="Please sign in. I'll wait here and continue once you're logged in.",
-                    screenshot=await self.engine.screenshot(),
                     url=state["url"],
                     title=state["title"],
                 )
-                # The execute loop pauses here — the WebSocket route
-                # resumes after the user signals they're done logging in.
                 return
 
         # ── Step 3: Execute plan steps ────────────────────
+        task_complete = False
+
         for step_idx, step in enumerate(steps):
             yield BrowserEvent(
                 type="status",
@@ -276,15 +300,14 @@ class BrowserAgent:
                 total_actions=len(steps),
             )
 
-            self._last_actions = []   # reset loop detector per step
+            self._last_actions = []
 
-            # Inner action loop for this step
             for action_num in range(self._max_actions):
                 state = await self.engine.get_page_state()
                 forms = await self.engine.analyze_forms()
                 action = await self._decide_action(task, step, state, forms)
 
-                # ── Loop detection: same action+element 3 times in a row ──
+                # ── Loop detection ──
                 action_sig = f"{action.kind.value}:{action.element_id}:{action.text[:30]}"
                 self._last_actions.append(action_sig)
                 if len(self._last_actions) >= 3 and len(set(self._last_actions[-3:])) == 1:
@@ -292,31 +315,29 @@ class BrowserAgent:
                     yield BrowserEvent(
                         type="interactive",
                         message="I seem to be stuck. Could you check the page and tell me what to do next?",
-                        screenshot=await self.engine.screenshot(),
                         url=state["url"],
                         title=state["title"],
                     )
                     return
 
                 if action.kind == ActionKind.done:
+                    task_complete = True
                     break
 
                 if action.kind == ActionKind.wait_for_user:
                     yield BrowserEvent(
                         type="interactive",
                         message=action.thought or "I need you to do something on this page.",
-                        screenshot=await self.engine.screenshot(),
                         url=state["url"],
                         title=state["title"],
                     )
-                    return  # pause — frontend will resume
+                    return
 
                 if action.kind == ActionKind.extract:
                     extracted = await self._extract_data(task, state)
                     yield BrowserEvent(
                         type="result",
                         message="Here's what I found.",
-                        screenshot=await self.engine.screenshot(),
                         data=extracted,
                         url=state["url"],
                         title=state["title"],
@@ -324,33 +345,41 @@ class BrowserAgent:
                     yield BrowserEvent(type="complete", message="Task complete.", data=extracted)
                     return
 
-                # Execute the action
                 yield BrowserEvent(
                     type="action",
                     message=action.thought,
-                    screenshot=await self.engine.screenshot(),
                     url=state["url"],
                 )
                 await self._run_action(action)
-                self._action_history.append(
-                    f"[{action.kind.value}] {action.thought}"
-                )
-
-                # After some actions, give a short pause for page to settle
+                self._action_history.append(f"[{action.kind.value}] {action.thought}")
                 await asyncio.sleep(0.8)
 
-        # If we get here without an explicit extract/done, do a final extraction
+            if task_complete:
+                break  # exit the steps loop too
+
+        # ── Final outcome ──────────────────────────────────
         state = await self.engine.get_page_state()
-        extracted = await self._extract_data(task, state)
-        yield BrowserEvent(
-            type="result",
-            message="Here's what I found.",
-            screenshot=await self.engine.screenshot(),
-            data=extracted,
-            url=state["url"],
-            title=state["title"],
-        )
-        yield BrowserEvent(type="complete", message="Task complete.", data=extracted)
+
+        if extract_to_app and not task_complete:
+            # User asked us to summarize/extract data into the app
+            extracted = await self._extract_data(task, state)
+            yield BrowserEvent(
+                type="result",
+                message="Here's what I found.",
+                data=extracted,
+                url=state["url"],
+                title=state["title"],
+            )
+            yield BrowserEvent(type="complete", message="Task complete.", data=extracted)
+        else:
+            # Just show the browser — task is done, page is visible
+            yield BrowserEvent(
+                type="complete",
+                message="Done." if task_complete else f"Finished on: {state.get('title', '')}",
+                url=state.get("url", ""),
+                title=state.get("title", ""),
+                data={"summary": f"Task completed. Browser is showing: {state.get('url', '')}"},
+            )
 
     async def continue_after_login(self, task: str, plan: dict) -> AsyncGenerator[BrowserEvent, None]:
         """
@@ -531,6 +560,16 @@ def _format_elements(elements: list[dict]) -> str:
             parts.append(f'→ {el["href"][:80]}')
         lines.append(" ".join(parts))
     return "\n".join(lines)
+
+
+def _is_navigation_step(step: str) -> bool:
+    """True when a plan step is only a navigation action (no interaction needed)."""
+    step_lower = step.lower()
+    nav_phrases = ["navigate to", "go to", "open ", "visit ", "load "]
+    action_phrases = ["click", "fill", "type", "search", "login", "sign in", "submit", "scroll", "find", "look for"]
+    has_nav = any(step_lower.startswith(p) or f" {p}" in step_lower for p in nav_phrases)
+    has_action = any(p in step_lower for p in action_phrases)
+    return has_nav and not has_action
 
 
 def _looks_like_login(state: dict) -> bool:
